@@ -4,6 +4,15 @@ applyTo: "src/test/java/**/*.java"
 
 # Test Instructions (Spring Boot 4)
 
+## Mandatory test coverage
+
+**Every code change must include or update tests.** This is a non-negotiable project rule.
+
+- New service method → add a test case for the happy path AND at least one error case
+- Bug fix → add a test that would have caught the bug (regression test)
+- New exception type or HTTP mapping → assert the exact status code and `$.code` field
+- Run `./mvnw test -pl <service>` locally before pushing
+
 ## Setup Pattern
 
 `TestRestTemplate` and `@AutoConfigureMockMvc` **do not exist** in Spring Boot 4.

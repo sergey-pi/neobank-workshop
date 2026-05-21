@@ -48,3 +48,4 @@ brew services start postgresql@16    # macOS Homebrew
 4. **Schema changes = new Flyway file** `V{N}__{description}.sql` → migrate → generate-sources.
 5. **`common` first.** Any build that references `common` requires `./mvnw install -pl common -am` to run first.
 6. **Git workflow**: `WSNB - <message>` commit prefix, no Co-authored-by, branch per feature, PR per change.
+7. **Tests are mandatory.** Every code change must include or update integration tests. Run `./mvnw test -pl <service>` before pushing — a PR with failing or missing tests will not be merged.
