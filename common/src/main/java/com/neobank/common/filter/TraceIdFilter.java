@@ -1,4 +1,4 @@
-package com.neobank.paymentservice.filter;
+package com.neobank.common.filter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -6,19 +6,23 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.UUID;
 
-@Component
 @Order(1)
 public class TraceIdFilter extends OncePerRequestFilter {
 
     public static final String TRACE_ID_HEADER = "X-Trace-Id";
     public static final String MDC_TRACE_ID = "traceId";
     public static final String MDC_SERVICE = "service";
+
+    private final String serviceName;
+
+    public TraceIdFilter(String serviceName) {
+        this.serviceName = serviceName;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -29,7 +33,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
             traceId = UUID.randomUUID().toString();
         }
         MDC.put(MDC_TRACE_ID, traceId);
-        MDC.put(MDC_SERVICE, "payment-service");
+        MDC.put(MDC_SERVICE, serviceName);
         response.setHeader(TRACE_ID_HEADER, traceId);
         try {
             filterChain.doFilter(request, response);
