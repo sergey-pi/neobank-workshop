@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Multi-module Maven project (Java 21, Spring Boot 4.0.3) consisting of three independent microservices, each with its own PostgreSQL database:
+Multi-module Maven project (Java 21, Spring Boot 4.0.6) consisting of three independent microservices, each with its own PostgreSQL database:
 
 | Service | Port | Database | Responsibility |
 |---|---|---|---|
@@ -100,18 +100,18 @@ Databases: neobank_user_db | neobank_ledger_db | neobank_payment_db
 Credentials are configured in each service's `src/main/resources/application.yml` and mirrored in the Flyway/jOOQ Maven plugin configuration in `pom.xml`.
 
 ### Exception Handling
-Each service has a `GlobalExceptionHandler` (`exception/GlobalExceptionHandler.java`) annotated with `@RestControllerAdvice`:
-- `IllegalArgumentException` → 400 Bad Request `{"error": "..."}`
-- `RuntimeException` → 500 Internal Server Error `{"error": "..."}`
+A shared `GlobalExceptionHandler` in the `common` module is auto-configured into all services via Spring Boot autoconfiguration. It returns RFC 7807 `ProblemDetail` responses:
+- `ConflictException` → 409, `code=CONFLICT`
+- `NotFoundException` → 404, `code=NOT_FOUND`
+- `UnprocessableException` → 422, `code=UNPROCESSABLE`
+- `IllegalArgumentException` → 400
+- `RuntimeException` → 500
 
 ## Testing Conventions (Spring Boot 4)
 
 - `TestRestTemplate` and `@AutoConfigureMockMvc` are **removed** in Spring Boot 4.
 - Use `MockMvcBuilders.webAppContextSetup(context).build()` in `@BeforeEach`.
-- `ObjectMapper` is **not** a Spring bean in the test context — instantiate directly:
-  ```java
-  private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-  ```
+- Spring Boot 4 uses **Jackson 3.x** (`tools.jackson.core:jackson-databind`). Import `ObjectMapper` from `tools.jackson.databind.ObjectMapper` and inject it with `@Autowired` — do not construct it manually.
 - Test classes use `@SpringBootTest` (full context) against the local PostgreSQL.
 - Tests are **not** isolated per-run — use unique emails/references (e.g., `UUID.randomUUID()`) to avoid conflicts across runs.
 
