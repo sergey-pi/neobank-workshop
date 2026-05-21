@@ -1,0 +1,91 @@
+@startuml C4_Neo_Bank_Architecture
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title "Container Diagram for Neo-Bank Microservices MVP"
+
+'---------------------------------------
+' EXTERNAL SYSTEMS & ACTORS
+'---------------------------------------
+Person(customer, "Customer", "A user of the bank, with personal or business accounts.")
+Person(support, "Support Agent", "Internal bank staff managing customer issues and compliance.")
+
+System_Ext(sepa_network, "SEPA Clearing Network", "External banking network for EUR transfers.")
+System_Ext(firebase, "Firebase (FCM)", "External cloud messaging for push notifications.")
+System_Ext(sendgrid, "SendGrid", "External email delivery API.")
+
+'---------------------------------------
+' SYSTEM BOUNDARY
+'---------------------------------------
+System_Boundary(neobank, "Neo-Bank Platform") {
+    
+    ' API Gateways
+    Container(waf, "Cloud Armor (WAF)", "GCP Component", "Filters malicious traffic (DDoS, SQLi) and enforces geographic rate limits.")
+    Container(public_gateway, "Public API Gateway", "Spring Cloud Gateway", "Handles SSL termination, global rate limiting, and routes mobile traffic.")
+    Container(internal_gateway, "Internal API Gateway", "Spring Cloud Gateway", "Routes traffic from VPN/SSO authenticated support agents.")
+
+    ' Core Microservices
+    Container(user_service, "User & Identity Service", "Java, Spring Boot", "Manages auth, ABAC feature flags, and profiles.")
+    Container(ledger_cmd_service, "Ledger Command Service", "Java, Spring Boot", "Handles strict ACID double-entry accounting transactions.")
+    Container(ledger_qry_service, "Ledger Query Service", "Java, Spring Boot", "CQRS read models for incredibly fast balance/history lookups.")
+    Container(payment_service, "Payment & Routing Service", "Java, Spring Boot", "Anti-corruption layer & State Machine for external SEPA/SWIFT routing.")
+    Container(notification_service, "Notification Service", "Java, Spring Boot", "Consumes Kafka events to dispatch emails and push notifications asynchronously.")
+
+    ' Data Stores
+    ContainerDb(redis_session, "Redis Cache", "GCP Memorystore", "Stores opaque session tokens, capability claims, and fast rate-limit counters.")
+    ContainerDb(db_users, "PostgreSQL: Users", "Cloud SQL", "Stores core identity (users) and PII (user_profiles).")
+    ContainerDb(db_ledger, "PostgreSQL: Ledger", "Cloud SQL", "Stores strictly immutable double-entry accounts, transactions, and entries.")
+    ContainerDb(db_payments, "PostgreSQL: Payments", "Cloud SQL", "Stores long-lived SEPA state machines and the transactional outbox.")
+
+    ' Eventing and Analytics
+    ContainerQueue(kafka, "Kafka Event Bus", "Confluent / PubSub", "Decouples transaction commits from analytics and notifications.")
+    ContainerDb(elastic_search, "Elasticsearch", "Elastic Cloud", "Ingests profiles for lightning-fast unstructured PII searches without locking PostgreSQL.")
+    ContainerDb(olap_clickhouse, "ClickHouse", "Managed OLAP", "Ingests raw database changes via Debezium for real-time compliance reporting and auditing.")
+}
+
+'---------------------------------------
+' RELATIONSHIPS & FLOWS
+'---------------------------------------
+
+' Edge Routing
+Rel(customer, waf, "Makes API calls via Mobile App", "HTTPS")
+Rel(waf, public_gateway, "Forwards clean traffic", "HTTPS")
+Rel(support, internal_gateway, "Makes backoffice queries", "Internal VPC / VPN")
+
+' Gateway to Services
+Rel(public_gateway, redis_session, "Validates opaque token headers", "Redis Protocol")
+Rel(public_gateway, user_service, "Routes to /api/v1/users", "REST")
+Rel(public_gateway, ledger_cmd_service, "Routes to /api/v1/transfers", "REST")
+Rel(public_gateway, ledger_qry_service, "Routes to /api/v1/balances", "REST")
+Rel(public_gateway, payment_service, "Routes to /api/v1/payments", "REST")
+
+Rel(internal_gateway, elastic_search, "Searches customer names/PII", "REST")
+Rel(internal_gateway, ledger_qry_service, "Looksup transaction histories", "REST")
+
+' Services to Databases
+Rel(user_service, db_users, "Reads/Writes user states", "JDBC / jOOQ")
+Rel(ledger_cmd_service, db_ledger, "Takes pessimistic locks and writes entries", "JDBC / jOOQ")
+Rel(ledger_qry_service, db_ledger, "Reads from read-replicas", "JDBC / jOOQ")
+Rel(payment_service, db_payments, "Updates state machine & writes idempotency keys", "JDBC / jOOQ")
+
+' Service Inter-communication
+Rel(payment_service, ledger_cmd_service, "Triggers internal ledger debit for SEPA", "gRPC / REST (mTLS)")
+
+' Async Caching
+Rel(ledger_cmd_service, redis_session, "Async updates cached balances", "Redis Protocol")
+
+' Change Data Capture (CDC)
+Rel(db_users, elastic_search, "Debezium streams PII changes", "Kafka Connect")
+Rel(db_ledger, kafka, "Debezium streams committed entries", "Kafka Connect")
+Rel(db_payments, kafka, "Debezium processes Outbox Pattern", "Kafka Connect")
+
+' Event Consumption
+Rel(kafka, notification_service, "Consumes FUNDS_RECEIVED events", "Kafka Topic")
+Rel(kafka, olap_clickhouse, "Streams raw audit logs for reporting", "Kafka Topic")
+Rel(notification_service, user_service, "Checks notification preferences", "gRPC / REST")
+
+' External APIs
+Rel(payment_service, sepa_network, "Sends/Receives ISO 20022 XML", "mTLS")
+Rel(notification_service, firebase, "Sends push payload", "REST")
+Rel(notification_service, sendgrid, "Sends email HTML", "REST")
+
+@enduml

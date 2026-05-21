@@ -1,0 +1,39 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Archives
+*.zip
+
+# Spring Boot
+spring-shell.log
+
+# Docker volumes (local data)
+postgres_data/
+
+# Environment overrides (copy from .env.example)
+.env
+
+# Resolved/temp session files
+*.resolved
+
+# AI session artifacts
+Implementation Plan-1
