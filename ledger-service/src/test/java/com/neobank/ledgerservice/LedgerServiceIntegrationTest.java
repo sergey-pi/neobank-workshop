@@ -1,8 +1,9 @@
 package com.neobank.ledgerservice;
 
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
-import tools.jackson.databind.ObjectMapper;
 import com.neobank.ledgerservice.dto.TransferRequest;
+import com.neobank.ledgerservice.jooq.tables.Balances;
+import org.jooq.DSLContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.UUID;
 
@@ -28,6 +30,9 @@ class LedgerServiceIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private DSLContext dsl;
 
     private MockMvc mockMvc;
 
@@ -51,25 +56,79 @@ class LedgerServiceIntegrationTest {
                 objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText());
     }
 
+    private void fundAccount(UUID accountId, long amount) {
+        dsl.update(Balances.BALANCES)
+                .set(Balances.BALANCES.AVAILABLE_AMOUNT, amount)
+                .where(Balances.BALANCES.ACCOUNT_ID.eq(accountId))
+                .execute();
+    }
+
     @Test
     void createAccount_success() throws Exception {
         createAccount(UUID.randomUUID());
     }
 
     @Test
-    void transfer_insufficientFunds_returnsError() throws Exception {
-        UUID senderAccount = createAccount(UUID.randomUUID());
-        UUID receiverAccount = createAccount(UUID.randomUUID());
+    void transfer_success() throws Exception {
+        UUID sender = createAccount(UUID.randomUUID());
+        UUID receiver = createAccount(UUID.randomUUID());
+        fundAccount(sender, 5000L);
 
-        TransferRequest request = new TransferRequest(
-                senderAccount, receiverAccount, 1000L, "USD", "Test transfer");
+        TransferRequest request = new TransferRequest(sender, receiver, 1000L, "USD", "Test transfer");
 
         mockMvc.perform(post("/api/v1/transactions/transfer")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code").value("UNPROCESSABLE"))
-                .andExpect(jsonPath("$.detail").isNotEmpty());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.transactionId").isNotEmpty());
+    }
+
+    @Test
+    void transfer_insufficientFunds_returns400() throws Exception {
+        UUID sender = createAccount(UUID.randomUUID());
+        UUID receiver = createAccount(UUID.randomUUID());
+        // sender has 0 balance — no funding
+
+        TransferRequest request = new TransferRequest(sender, receiver, 1000L, "USD", "Test transfer");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "Insufficient funds in account " + sender));
+    }
+
+    @Test
+    void transfer_nonExistentFromAccount_returns400() throws Exception {
+        UUID ghost = UUID.randomUUID();
+        UUID receiver = createAccount(UUID.randomUUID());
+
+        TransferRequest request = new TransferRequest(ghost, receiver, 100L, "USD", "Ghost sender");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "From account not found or has no balance: " + ghost));
+    }
+
+    @Test
+    void transfer_nonExistentToAccount_returns400() throws Exception {
+        UUID sender = createAccount(UUID.randomUUID());
+        UUID ghost = UUID.randomUUID();
+        fundAccount(sender, 5000L);
+
+        TransferRequest request = new TransferRequest(sender, ghost, 100L, "USD", "Ghost receiver");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "Destination account not found or inactive: " + ghost));
     }
 
     @Test
@@ -84,3 +143,4 @@ class LedgerServiceIntegrationTest {
                 .andExpect(status().isOk());
     }
 }
+
