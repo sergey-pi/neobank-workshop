@@ -1,5 +1,7 @@
 name: "Copilot Setup Steps"
 
+# Runs automatically when this file changes (for validation), and can be
+# triggered manually from the Actions tab to verify the setup works.
 on:
   workflow_dispatch:
   push:
@@ -10,12 +12,17 @@ on:
       - .github/workflows/copilot-setup-steps.yml
 
 jobs:
+  # Job name MUST be `copilot-setup-steps` — Copilot looks for this exact name.
   copilot-setup-steps:
     runs-on: ubuntu-latest
+    timeout-minutes: 59
 
     permissions:
-      contents: read
+      contents: read  # needed for checkout
 
+    # PostgreSQL is required for Flyway migrations and jOOQ source generation.
+    # Copilot needs the DB live so it can apply schema changes and regenerate
+    # generated sources after modifying migration files.
     services:
       postgres:
         image: postgres:16-alpine
@@ -33,29 +40,40 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
+      - name: Set up Java 21 (Temurin) with Maven cache
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
 
-      - name: Make mvnw executable
+      - name: Make Maven wrapper executable
         run: chmod +x mvnw
 
-      - name: Create additional databases
+      - name: Create ledger and payment databases
         run: |
           PGPASSWORD=neopassword psql -h localhost -U neouser -d postgres \
             -c "CREATE DATABASE neobank_ledger_db;" \
             -c "CREATE DATABASE neobank_payment_db;"
 
+      # Install common module into local Maven repo first.
+      # The -am flag also installs the parent POM, which is required for
+      # any subsequent per-module build to resolve the parent descriptor.
+      - name: Install common module
+        run: ./mvnw install -pl common -am -DskipTests --no-transfer-progress
+
+      # Apply schema migrations so the DB is in the expected state for
+      # jOOQ code generation in the compile step below.
       - name: Apply Flyway migrations (all services)
         run: |
           ./mvnw flyway:migrate -pl user-service --no-transfer-progress
           ./mvnw flyway:migrate -pl ledger-service --no-transfer-progress
           ./mvnw flyway:migrate -pl payment-service --no-transfer-progress
 
-      - name: Generate jOOQ sources and compile (all services)
-        run: ./mvnw clean compile -DskipTests --no-transfer-progress
+      # Full compile (including jOOQ source generation) warms the Maven
+      # dependency cache and gives Copilot ready-to-use generated sources.
+      # Tests are skipped here — Copilot will run them when verifying changes.
+      - name: Build all modules (skip tests)
+        run: ./mvnw install -DskipTests --no-transfer-progress
