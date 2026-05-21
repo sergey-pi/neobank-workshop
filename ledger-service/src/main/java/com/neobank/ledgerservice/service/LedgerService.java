@@ -1,5 +1,6 @@
 package com.neobank.ledgerservice.service;
 
+import com.neobank.common.exception.UnprocessableException;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
 import com.neobank.ledgerservice.jooq.tables.Balances;
@@ -73,7 +74,7 @@ public class LedgerService {
                 .execute();
 
         if (updatedFrom == 0) {
-            throw new RuntimeException(
+            throw new UnprocessableException(
                     "Insufficient funds or concurrent update for account " + request.fromAccountId());
         }
 
