@@ -9,7 +9,6 @@ import org.jooq.DSLContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
@@ -31,10 +30,10 @@ public class LedgerService {
         // 2. Insert Transaction record
         dsl.insertInto(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.ID, transactionId)
+                .set(Transactions.TRANSACTIONS.REFERENCE, UUID.randomUUID().toString())
                 .set(Transactions.TRANSACTIONS.TYPE, "P2P_TRANSFER")
                 .set(Transactions.TRANSACTIONS.STATUS, "COMPLETED")
                 .set(Transactions.TRANSACTIONS.DESCRIPTION, request.description())
-                .set(Transactions.TRANSACTIONS.METADATA, null) // Could add JSON metadata here
                 .execute();
 
         // 3. Create Entries (Double-Entry)
@@ -44,6 +43,7 @@ public class LedgerService {
                 .set(Entries.ENTRIES.TRANSACTION_ID, transactionId)
                 .set(Entries.ENTRIES.ACCOUNT_ID, request.fromAccountId())
                 .set(Entries.ENTRIES.AMOUNT, -request.amount())
+                .set(Entries.ENTRIES.TYPE, "DEBIT")
                 .set(Entries.ENTRIES.CURRENCY, request.currency())
                 .set(Entries.ENTRIES.DESCRIPTION, "Debit for transfer to " + request.toAccountId())
                 .execute();
@@ -54,6 +54,7 @@ public class LedgerService {
                 .set(Entries.ENTRIES.TRANSACTION_ID, transactionId)
                 .set(Entries.ENTRIES.ACCOUNT_ID, request.toAccountId())
                 .set(Entries.ENTRIES.AMOUNT, request.amount())
+                .set(Entries.ENTRIES.TYPE, "CREDIT")
                 .set(Entries.ENTRIES.CURRENCY, request.currency())
                 .set(Entries.ENTRIES.DESCRIPTION, "Credit from transfer from " + request.fromAccountId())
                 .execute();
@@ -76,7 +77,6 @@ public class LedgerService {
                     "Insufficient funds or concurrent update for account " + request.fromAccountId());
         }
 
-        // Update To Account
         dsl.update(Balances.BALANCES)
                 .set(Balances.BALANCES.AVAILABLE_AMOUNT, Balances.BALANCES.AVAILABLE_AMOUNT.plus(request.amount()))
                 .set(Balances.BALANCES.VERSION, Balances.BALANCES.VERSION.plus(1))
