@@ -42,7 +42,11 @@ class LedgerServiceIntegrationTest {
     }
 
     private UUID createAccount(UUID userId) throws Exception {
-        CreateAccountRequest request = new CreateAccountRequest(userId, "USD", "Main Wallet", "LIABILITY");
+        return createAccountWithCurrency(userId, "USD");
+    }
+
+    private UUID createAccountWithCurrency(UUID userId, String currency) throws Exception {
+        CreateAccountRequest request = new CreateAccountRequest(userId, currency, "Main Wallet", "LIABILITY");
 
         MvcResult result = mockMvc.perform(post("/api/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -128,7 +132,40 @@ class LedgerServiceIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
-                        "Destination account not found or inactive: " + ghost));
+                        "Destination account not found or has no balance: " + ghost));
+    }
+
+    @Test
+    void transfer_currencyMismatch_returns400() throws Exception {
+        UUID sender = createAccountWithCurrency(UUID.randomUUID(), "USD");
+        UUID receiver = createAccountWithCurrency(UUID.randomUUID(), "EUR");
+        fundAccount(sender, 5000L);
+
+        TransferRequest request = new TransferRequest(sender, receiver, 100L, "USD", "Cross-currency attempt");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "Currency mismatch between accounts: source is USD, destination is EUR"));
+    }
+
+    @Test
+    void transfer_requestCurrencyMismatch_returns400() throws Exception {
+        UUID sender = createAccount(UUID.randomUUID());
+        UUID receiver = createAccount(UUID.randomUUID());
+        fundAccount(sender, 5000L);
+
+        // Both accounts are USD but request says EUR
+        TransferRequest request = new TransferRequest(sender, receiver, 100L, "EUR", "Wrong currency in request");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "Request currency EUR does not match account currency USD"));
     }
 
     @Test
