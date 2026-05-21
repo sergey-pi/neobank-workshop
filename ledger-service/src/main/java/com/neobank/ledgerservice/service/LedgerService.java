@@ -1,31 +1,67 @@
 package com.neobank.ledgerservice.service;
 
+import com.neobank.common.exception.UnprocessableException;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
+import com.neobank.ledgerservice.gateway.KycGateway;
+import com.neobank.ledgerservice.jooq.tables.Accounts;
 import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
 import com.neobank.ledgerservice.jooq.tables.records.BalancesRecord;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Service
 public class LedgerService {
 
     private final DSLContext dsl;
+    private final KycGateway kycGateway;
 
-    public LedgerService(DSLContext dsl) {
+    @Value("${security.limits.max-transfer-amount}")
+    private long maxTransferAmount;
+
+    @Value("${security.limits.daily-spend-limit}")
+    private long dailySpendLimit;
+
+    public LedgerService(DSLContext dsl, KycGateway kycGateway) {
         this.dsl = dsl;
+        this.kycGateway = kycGateway;
     }
 
     @Transactional
     public TransferResponse transfer(TransferRequest request) {
-        // 1. Lock fromAccount balance row with SELECT FOR UPDATE.
-        //    This must happen first — before any inserts — to establish a
-        //    consistent ordering and prevent double-spend under concurrency.
+        // 1. Per-transaction limit check — fast fail before any DB I/O.
+        if (request.amount() > maxTransferAmount) {
+            throw new UnprocessableException(
+                    "Transfer amount " + request.amount()
+                    + " exceeds per-transaction limit of " + maxTransferAmount);
+        }
+
+        // 2. Resolve userId for KYC gate.
+        UUID fromUserId = dsl.select(Accounts.ACCOUNTS.USER_ID)
+                .from(Accounts.ACCOUNTS)
+                .where(Accounts.ACCOUNTS.ID.eq(request.fromAccountId()))
+                .fetchOne(Accounts.ACCOUNTS.USER_ID);
+
+        if (fromUserId == null) {
+            throw new IllegalArgumentException(
+                    "From account not found or has no balance: " + request.fromAccountId());
+        }
+
+        // 3. KYC gate — transfer is blocked if user is not APPROVED.
+        kycGateway.requireKycApproved(fromUserId);
+
+        // 4. Lock fromAccount balance row with SELECT FOR UPDATE.
+        //    Must happen before any inserts to establish consistent ordering
+        //    and prevent double-spend under concurrency.
         BalancesRecord fromBalance = dsl.selectFrom(Balances.BALANCES)
                 .where(Balances.BALANCES.ACCOUNT_ID.eq(request.fromAccountId()))
                 .forUpdate()
@@ -36,9 +72,7 @@ public class LedgerService {
                     "From account not found or has no balance: " + request.fromAccountId());
         }
 
-        // 2. Fetch toAccount balance for currency and existence validation.
-        //    Using balances table (not accounts) because we need the currency
-        //    value stored there, and a balance row is required for credit anyway.
+        // 5. Fetch toAccount balance for currency and existence validation.
         BalancesRecord toBalance = dsl.selectFrom(Balances.BALANCES)
                 .where(Balances.BALANCES.ACCOUNT_ID.eq(request.toAccountId()))
                 .fetchOne();
@@ -48,9 +82,7 @@ public class LedgerService {
                     "Destination account not found or has no balance: " + request.toAccountId());
         }
 
-        // 3. Validate currencies. Both accounts must share the same currency,
-        //    and the request currency must match — prevents cross-currency transfers
-        //    that would require an FX rate (not supported in this service).
+        // 6. Validate currencies — prevents cross-currency transfers.
         if (!fromBalance.getCurrency().equals(toBalance.getCurrency())) {
             throw new IllegalArgumentException(
                     "Currency mismatch between accounts: source is "
@@ -63,7 +95,22 @@ public class LedgerService {
                             + " does not match account currency " + fromBalance.getCurrency());
         }
 
-        // 4. Validate funds now that we hold the lock.
+        // 7. Daily spend limit check (sum of today's debits on fromAccount).
+        OffsetDateTime startOfDay = LocalDate.now(ZoneOffset.UTC)
+                .atStartOfDay().atOffset(ZoneOffset.UTC);
+        Long todaySpend = dsl.select(org.jooq.impl.DSL.sum(Entries.ENTRIES.AMOUNT).neg())
+                .from(Entries.ENTRIES)
+                .where(Entries.ENTRIES.ACCOUNT_ID.eq(request.fromAccountId()))
+                .and(Entries.ENTRIES.TYPE.eq("DEBIT"))
+                .and(Entries.ENTRIES.CREATED_AT.greaterOrEqual(startOfDay))
+                .fetchOne(0, Long.class);
+
+        long spent = todaySpend == null ? 0L : todaySpend;
+        if (spent + request.amount() > dailySpendLimit) {
+            throw new UnprocessableException("Daily spend limit exceeded");
+        }
+
+        // 8. Validate sufficient funds — we hold the lock from step 4.
         if (fromBalance.getAvailableAmount() < request.amount()) {
             throw new IllegalArgumentException(
                     "Insufficient funds in account " + request.fromAccountId());
@@ -71,8 +118,7 @@ public class LedgerService {
 
         UUID transactionId = UUID.randomUUID();
 
-        // 5. Insert Transaction as PENDING — mark COMPLETED only after all
-        //    balance updates succeed.
+        // 9. Insert Transaction as PENDING — mark COMPLETED only after all writes succeed.
         dsl.insertInto(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.ID, transactionId)
                 .set(Transactions.TRANSACTIONS.REFERENCE, UUID.randomUUID().toString())
@@ -81,7 +127,7 @@ public class LedgerService {
                 .set(Transactions.TRANSACTIONS.DESCRIPTION, request.description())
                 .execute();
 
-        // 6. Insert double-entry ledger entries.
+        // 10. Insert double-entry ledger entries.
         dsl.insertInto(Entries.ENTRIES)
                 .set(Entries.ENTRIES.ID, UUID.randomUUID())
                 .set(Entries.ENTRIES.TRANSACTION_ID, transactionId)
@@ -102,7 +148,7 @@ public class LedgerService {
                 .set(Entries.ENTRIES.DESCRIPTION, "Credit from transfer from " + request.fromAccountId())
                 .execute();
 
-        // 7. Debit fromAccount — we already hold the lock and validated funds.
+        // 11. Debit fromAccount — lock held since step 4.
         dsl.update(Balances.BALANCES)
                 .set(Balances.BALANCES.AVAILABLE_AMOUNT,
                         Balances.BALANCES.AVAILABLE_AMOUNT.minus(request.amount()))
@@ -110,8 +156,7 @@ public class LedgerService {
                 .where(Balances.BALANCES.ACCOUNT_ID.eq(request.fromAccountId()))
                 .execute();
 
-        // 8. Credit toAccount. Safety guard — toBalance was verified in step 2,
-        //    but returning 0 here would mean money disappeared silently.
+        // 12. Credit toAccount. Return 0 means balance row disappeared — fail the transaction.
         int updatedTo = dsl.update(Balances.BALANCES)
                 .set(Balances.BALANCES.AVAILABLE_AMOUNT,
                         Balances.BALANCES.AVAILABLE_AMOUNT.plus(request.amount()))
@@ -124,7 +169,7 @@ public class LedgerService {
                     "Destination account has no balance row: " + request.toAccountId());
         }
 
-        // 9. All writes succeeded — mark transaction COMPLETED.
+        // 13. All writes succeeded — mark transaction COMPLETED.
         dsl.update(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.STATUS, "COMPLETED")
                 .where(Transactions.TRANSACTIONS.ID.eq(transactionId))

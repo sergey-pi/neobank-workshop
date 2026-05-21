@@ -33,6 +33,11 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "UNPROCESSABLE", ex.getMessage());
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    public ProblemDetail handleForbidden(ForbiddenException ex) {
+        return problem(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
         return problem(HttpStatus.BAD_REQUEST, "BAD_REQUEST", ex.getMessage());

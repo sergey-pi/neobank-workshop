@@ -21,3 +21,7 @@ logging:
 neobank:
   error:
     base-url: ${ERROR_BASE_URL:https://neobank.com/errors}
+
+security:
+  rate-limit:
+    requests-per-minute: ${RATE_LIMIT_RPM:10}

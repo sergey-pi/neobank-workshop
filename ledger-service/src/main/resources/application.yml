@@ -21,3 +21,12 @@ logging:
 neobank:
   error:
     base-url: ${ERROR_BASE_URL:https://neobank.com/errors}
+
+services:
+  user-service:
+    base-url: ${USER_SERVICE_URL:http://localhost:8081}
+
+security:
+  limits:
+    max-transfer-amount: ${MAX_TRANSFER_AMOUNT:1000000}
+    daily-spend-limit: ${DAILY_SPEND_LIMIT:5000000}
