@@ -67,7 +67,9 @@ class LedgerServiceIntegrationTest {
         mockMvc.perform(post("/api/v1/transactions/transfer")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().is5xxServerError());
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("UNPROCESSABLE"))
+                .andExpect(jsonPath("$.detail").isNotEmpty());
     }
 
     @Test

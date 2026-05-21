@@ -1,5 +1,6 @@
 package com.neobank.userservice.service;
 
+import com.neobank.common.exception.ConflictException;
 import com.neobank.userservice.dto.UserRegistrationRequest;
 import com.neobank.userservice.dto.UserResponse;
 import com.neobank.userservice.jooq.tables.UserAddresses;
@@ -29,7 +30,7 @@ public class UserService {
         // 1. Check if user already exists
         boolean exists = dsl.fetchExists(dsl.selectFrom(Users.USERS).where(Users.USERS.EMAIL.eq(request.email())));
         if (exists) {
-            throw new RuntimeException("User with email " + request.email() + " already exists");
+            throw new ConflictException("User with email " + request.email() + " already exists");
         }
 
         UUID userId = UUID.randomUUID();
