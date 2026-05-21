@@ -16,8 +16,10 @@ Full details: [`.github/copilot-instructions.md`](.github/copilot-instructions.m
 ## Essential Commands
 
 ```bash
-# 1. Start PostgreSQL AND Redis (required for everything below)
-docker compose up -d
+# 1. Start PostgreSQL and Redis (native local services)
+brew services start postgresql@16
+brew services start redis
+# docker-compose.yml is for CI only
 
 # 2. Install common before anything else (parent POM + common jar must be in local repo)
 ./mvnw install -pl common -am -DskipTests

@@ -66,12 +66,12 @@ See [`architecture_c4.puml`](./architecture_c4.puml) for the full C4 container d
 ### 1. Start PostgreSQL and Redis
 
 ```bash
-docker compose up -d
+# Local development — start services natively
+brew services start postgresql@16
+brew services start redis
 ```
 
-This starts:
-- **PostgreSQL 16** on port `5432` with three databases: `neobank_user_db`, `neobank_ledger_db`, `neobank_payment_db`
-- **Redis 7** on port `6379` (no persistence — cache-only mode)
+> `docker-compose.yml` is for CI only. For local development start PostgreSQL and Redis as native services.
 
 ### 2. Apply Flyway migrations
 
