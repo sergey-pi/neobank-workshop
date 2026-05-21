@@ -21,3 +21,8 @@ logging:
 neobank:
   error:
     base-url: ${ERROR_BASE_URL:https://neobank.com/errors}
+
+outbox:
+  poll:
+    interval-ms: ${OUTBOX_POLL_INTERVAL_MS:5000}
+    max-retries: ${OUTBOX_MAX_RETRIES:3}
