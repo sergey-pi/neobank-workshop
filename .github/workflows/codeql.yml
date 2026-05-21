@@ -55,7 +55,7 @@ jobs:
 
       - name: Apply Flyway migrations
         run: |
-          ./mvnw install -pl common --no-transfer-progress -DskipTests
+          ./mvnw install -pl common -am --no-transfer-progress -DskipTests
           ./mvnw flyway:migrate -pl user-service --no-transfer-progress
           ./mvnw flyway:migrate -pl ledger-service --no-transfer-progress
           ./mvnw flyway:migrate -pl payment-service --no-transfer-progress
