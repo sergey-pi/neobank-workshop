@@ -2,7 +2,6 @@ package com.neobank.ledgerservice.service;
 
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
-import com.neobank.ledgerservice.jooq.tables.Accounts;
 import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
@@ -37,19 +36,34 @@ public class LedgerService {
                     "From account not found or has no balance: " + request.fromAccountId());
         }
 
-        // 2. Verify toAccount exists before writing anything.
-        boolean toAccountExists = dsl.fetchExists(
-                dsl.selectOne()
-                        .from(Accounts.ACCOUNTS)
-                        .where(Accounts.ACCOUNTS.ID.eq(request.toAccountId()))
-                        .and(Accounts.ACCOUNTS.STATUS.eq("ACTIVE")));
+        // 2. Fetch toAccount balance for currency and existence validation.
+        //    Using balances table (not accounts) because we need the currency
+        //    value stored there, and a balance row is required for credit anyway.
+        BalancesRecord toBalance = dsl.selectFrom(Balances.BALANCES)
+                .where(Balances.BALANCES.ACCOUNT_ID.eq(request.toAccountId()))
+                .fetchOne();
 
-        if (!toAccountExists) {
+        if (toBalance == null) {
             throw new IllegalArgumentException(
-                    "Destination account not found or inactive: " + request.toAccountId());
+                    "Destination account not found or has no balance: " + request.toAccountId());
         }
 
-        // 3. Validate funds now that we hold the lock.
+        // 3. Validate currencies. Both accounts must share the same currency,
+        //    and the request currency must match — prevents cross-currency transfers
+        //    that would require an FX rate (not supported in this service).
+        if (!fromBalance.getCurrency().equals(toBalance.getCurrency())) {
+            throw new IllegalArgumentException(
+                    "Currency mismatch between accounts: source is "
+                            + fromBalance.getCurrency() + ", destination is "
+                            + toBalance.getCurrency());
+        }
+        if (!fromBalance.getCurrency().equals(request.currency())) {
+            throw new IllegalArgumentException(
+                    "Request currency " + request.currency()
+                            + " does not match account currency " + fromBalance.getCurrency());
+        }
+
+        // 4. Validate funds now that we hold the lock.
         if (fromBalance.getAvailableAmount() < request.amount()) {
             throw new IllegalArgumentException(
                     "Insufficient funds in account " + request.fromAccountId());
@@ -57,7 +71,7 @@ public class LedgerService {
 
         UUID transactionId = UUID.randomUUID();
 
-        // 4. Insert Transaction as PENDING — mark COMPLETED only after all
+        // 5. Insert Transaction as PENDING — mark COMPLETED only after all
         //    balance updates succeed.
         dsl.insertInto(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.ID, transactionId)
@@ -67,7 +81,7 @@ public class LedgerService {
                 .set(Transactions.TRANSACTIONS.DESCRIPTION, request.description())
                 .execute();
 
-        // 5. Insert double-entry ledger entries.
+        // 6. Insert double-entry ledger entries.
         dsl.insertInto(Entries.ENTRIES)
                 .set(Entries.ENTRIES.ID, UUID.randomUUID())
                 .set(Entries.ENTRIES.TRANSACTION_ID, transactionId)
@@ -88,7 +102,7 @@ public class LedgerService {
                 .set(Entries.ENTRIES.DESCRIPTION, "Credit from transfer from " + request.fromAccountId())
                 .execute();
 
-        // 6. Debit fromAccount — we already hold the lock and validated funds.
+        // 7. Debit fromAccount — we already hold the lock and validated funds.
         dsl.update(Balances.BALANCES)
                 .set(Balances.BALANCES.AVAILABLE_AMOUNT,
                         Balances.BALANCES.AVAILABLE_AMOUNT.minus(request.amount()))
@@ -96,8 +110,8 @@ public class LedgerService {
                 .where(Balances.BALANCES.ACCOUNT_ID.eq(request.fromAccountId()))
                 .execute();
 
-        // 7. Credit toAccount. If toAccount has no balance row the update
-        //    returns 0 rows — money would disappear silently, so we guard it.
+        // 8. Credit toAccount. Safety guard — toBalance was verified in step 2,
+        //    but returning 0 here would mean money disappeared silently.
         int updatedTo = dsl.update(Balances.BALANCES)
                 .set(Balances.BALANCES.AVAILABLE_AMOUNT,
                         Balances.BALANCES.AVAILABLE_AMOUNT.plus(request.amount()))
@@ -110,7 +124,7 @@ public class LedgerService {
                     "Destination account has no balance row: " + request.toAccountId());
         }
 
-        // 8. All writes succeeded — mark transaction COMPLETED.
+        // 9. All writes succeeded — mark transaction COMPLETED.
         dsl.update(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.STATUS, "COMPLETED")
                 .where(Transactions.TRANSACTIONS.ID.eq(transactionId))
