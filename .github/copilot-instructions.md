@@ -12,11 +12,24 @@ Multi-module Maven project (Java 21, Spring Boot 4.0.3) consisting of three inde
 
 Services reference each other only via `user_id` UUID — there are no cross-database foreign keys. The root `pom.xml` is the parent aggregator for these three modules. `core-engine/` is a separate standalone Spring Boot module (not part of the parent build).
 
+## Git Workflow
+
+- **Commit message convention**: `WSNB - <message>` (no Co-authored-by trailer)
+- **Never commit directly to `main`** — always create a feature branch and open a PR:
+  ```bash
+  git checkout -b phase-X-<description>
+  # ... do work, commit ...
+  git push -u origin phase-X-<description>
+  gh pr create --fill
+  ```
+
 ## Build & Run
 
 ```bash
-# Start PostgreSQL (required before any service starts or jOOQ generates)
-docker compose up -d
+# PostgreSQL priority: use local Homebrew PostgreSQL first.
+# If not available, fall back to Docker:
+#   brew services start postgresql@18   ← preferred
+#   docker compose up -d                ← fallback
 
 # Build all modules
 ./mvnw clean install
@@ -85,3 +98,28 @@ Databases: neobank_user_db | neobank_ledger_db | neobank_payment_db
 ```
 
 Credentials are configured in each service's `src/main/resources/application.yml` and mirrored in the Flyway/jOOQ Maven plugin configuration in `pom.xml`.
+
+### Exception Handling
+Each service has a `GlobalExceptionHandler` (`exception/GlobalExceptionHandler.java`) annotated with `@RestControllerAdvice`:
+- `IllegalArgumentException` → 400 Bad Request `{"error": "..."}`
+- `RuntimeException` → 500 Internal Server Error `{"error": "..."}`
+
+## Testing Conventions (Spring Boot 4)
+
+- `TestRestTemplate` and `@AutoConfigureMockMvc` are **removed** in Spring Boot 4.
+- Use `MockMvcBuilders.webAppContextSetup(context).build()` in `@BeforeEach`.
+- `ObjectMapper` is **not** a Spring bean in the test context — instantiate directly:
+  ```java
+  private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+  ```
+- Test classes use `@SpringBootTest` (full context) against the local PostgreSQL.
+- Tests are **not** isolated per-run — use unique emails/references (e.g., `UUID.randomUUID()`) to avoid conflicts across runs.
+
+## CI / GitHub Actions
+
+- `ci.yml`: starts PostgreSQL service container, creates 3 databases, runs Flyway migrations × 3, then `./mvnw verify`.
+- `codeql.yml`: same DB setup, runs security-and-quality queries weekly.
+- `mvnw` must be executable — CI has `chmod +x mvnw` step (macOS commits it as `100644`).
+- jOOQ generated sources live in `target/` (gitignored) — CI must run Flyway + compile to regenerate them.
+- Maven env var defaults: use `<properties>` block in `pom.xml` (`<db.host>localhost</db.host>`) — Maven does **not** support `${env.VAR:default}` syntax (only Spring Boot does).
+- Only `neobank_user_db` is created by the PostgreSQL service container's `POSTGRES_DB`; the other two must be created via `psql -c "CREATE DATABASE ..."` before Flyway runs.
