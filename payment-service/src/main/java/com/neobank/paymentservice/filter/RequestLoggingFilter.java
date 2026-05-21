@@ -27,8 +27,9 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
         } finally {
             long duration = System.currentTimeMillis() - start;
+            String sanitizedUri = request.getRequestURI().replaceAll("[\r\n]", "_");
             log.info("{} {} -> {} ({}ms)",
-                    request.getMethod(), request.getRequestURI(),
+                    request.getMethod(), sanitizedUri,
                     response.getStatus(), duration);
         }
     }
