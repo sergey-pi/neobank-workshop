@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: neouser
+          POSTGRES_PASSWORD: neopassword
+          POSTGRES_DB: neobank_user_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Create additional databases
+        run: |
+          PGPASSWORD=neopassword psql -h localhost -U neouser -d postgres \
+            -c "CREATE DATABASE neobank_ledger_db;" \
+            -c "CREATE DATABASE neobank_payment_db;"
+
+      - name: Apply Flyway migrations
+        run: |
+          ./mvnw flyway:migrate -pl user-service --no-transfer-progress
+          ./mvnw flyway:migrate -pl ledger-service --no-transfer-progress
+          ./mvnw flyway:migrate -pl payment-service --no-transfer-progress
+
+      - name: Build and test all services
+        run: ./mvnw verify --no-transfer-progress
