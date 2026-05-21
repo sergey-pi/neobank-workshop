@@ -35,12 +35,8 @@ jobs:
           languages: java
           queries: security-and-quality
 
-      - name: Build for CodeQL (skip tests, skip jOOQ codegen)
-        run: ./mvnw clean compile -DskipTests --no-transfer-progress
-        env:
-          DB_HOST: localhost
-          DB_USER: neouser
-          DB_PASSWORD: neopassword
+      - name: Build for CodeQL (skip tests and jOOQ codegen — requires live DB)
+        run: ./mvnw clean compile -DskipTests -Djooq.codegen.skip=true --no-transfer-progress
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

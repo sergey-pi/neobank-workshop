@@ -12,6 +12,14 @@
     <name>user-service</name>
     <description>User &amp; Identity Service</description>
 
+    <properties>
+        <db.host>localhost</db.host>
+        <db.port>5432</db.port>
+        <db.user>neouser</db.user>
+        <db.password>neopassword</db.password>
+        <db.url>jdbc:postgresql://${db.host}:${db.port}/neobank_user_db</db.url>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -61,9 +69,9 @@
                 <version>${flyway.version}</version>
                 <configuration>
                     <skip>false</skip>
-                    <url>jdbc:postgresql://${env.DB_HOST:localhost}:${env.DB_PORT:5432}/neobank_user_db</url>
-                    <user>${env.DB_USER:neouser}</user>
-                    <password>${env.DB_PASSWORD:neopassword}</password>
+                    <url>${db.url}</url>
+                    <user>${db.user}</user>
+                    <password>${db.password}</password>
                 </configuration>
                 <dependencies>
                     <dependency>
@@ -96,9 +104,9 @@
                 <configuration>
                     <jdbc>
                         <driver>org.postgresql.Driver</driver>
-                        <url>jdbc:postgresql://${env.DB_HOST:localhost}:${env.DB_PORT:5432}/neobank_user_db</url>
-                        <user>${env.DB_USER:neouser}</user>
-                        <password>${env.DB_PASSWORD:neopassword}</password>
+                        <url>${db.url}</url>
+                        <user>${db.user}</user>
+                        <password>${db.password}</password>
                     </jdbc>
                     <generator>
                         <name>org.jooq.codegen.JavaGenerator</name>
