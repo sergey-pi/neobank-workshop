@@ -18,6 +18,21 @@ jobs:
       actions: read
       contents: read
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: neouser
+          POSTGRES_PASSWORD: neopassword
+          POSTGRES_DB: neobank_user_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,14 +44,26 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Create additional databases
+        run: |
+          PGPASSWORD=neopassword psql -h localhost -U neouser -d postgres \
+            -c "CREATE DATABASE neobank_ledger_db;" \
+            -c "CREATE DATABASE neobank_payment_db;"
+
+      - name: Apply Flyway migrations
+        run: |
+          ./mvnw flyway:migrate -pl user-service --no-transfer-progress
+          ./mvnw flyway:migrate -pl ledger-service --no-transfer-progress
+          ./mvnw flyway:migrate -pl payment-service --no-transfer-progress
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: java
           queries: security-and-quality
 
-      - name: Build for CodeQL (skip tests and jOOQ codegen — requires live DB)
-        run: ./mvnw clean compile -DskipTests -Djooq.codegen.skip=true --no-transfer-progress
+      - name: Build for CodeQL (generates jOOQ sources then compiles)
+        run: ./mvnw clean compile -DskipTests --no-transfer-progress
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
