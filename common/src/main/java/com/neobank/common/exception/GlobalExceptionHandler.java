@@ -1,4 +1,4 @@
-package com.neobank.ledgerservice.exception;
+package com.neobank.common.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

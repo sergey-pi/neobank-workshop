@@ -17,6 +17,7 @@
     <description>Neo-Bank Parent Project</description>
 
     <modules>
+        <module>common</module>
         <module>user-service</module>
         <module>ledger-service</module>
         <module>payment-service</module>
