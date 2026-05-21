@@ -37,3 +37,7 @@ postgres_data/
 
 # AI session artifacts
 Implementation Plan-1
+
+# Log files
+logs/
+*.log

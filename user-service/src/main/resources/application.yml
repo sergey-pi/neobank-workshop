@@ -16,5 +16,4 @@ server:
   port: 8081
 
 logging:
-  level:
-    org.jooq: DEBUG
+  config: classpath:logback-spring.xml
