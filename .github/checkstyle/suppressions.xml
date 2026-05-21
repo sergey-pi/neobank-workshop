@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<suppressions>
+    <!-- Suppress all checks on jOOQ generated sources -->
+    <suppress checks=".*" files="[\\/]target[\\/]" />
+    <!-- Suppress Javadoc requirements — this is a workshop service, not a library -->
+    <suppress checks="MissingJavadocMethod" files=".*\.java" />
+    <suppress checks="MissingJavadocType" files=".*\.java" />
+    <suppress checks="JavadocVariable" files=".*\.java" />
+    <suppress checks="JavadocMethod" files=".*\.java" />
+    <!-- Suppress magic number check in tests — test data literals are intentional -->
+    <suppress checks="MagicNumber" files=".*Test\.java" />
+    <!-- Allow underscore_case method names in tests (JUnit convention) -->
+    <suppress checks="MethodName" files=".*Test\.java" />
+</suppressions>

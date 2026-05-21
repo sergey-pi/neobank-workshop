@@ -1,0 +1,135 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  Spring-style Checkstyle configuration for NeoBank Workshop.
+  Based on conventions used in spring-framework and spring-boot:
+  - 4-space indentation
+  - 120-character line length
+  - No star imports
+  - Standard Java naming conventions
+  - No trailing whitespace
+  Formatting/whitespace pedantry is intentionally excluded — focus on meaningful rules.
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="warning"/>
+    <property name="fileExtensions" value="java"/>
+
+    <module name="SuppressionFilter">
+        <property name="file" value="${org.checkstyle.google.suppressionfilter.config}"
+            default="checkstyle-suppressions.xml" />
+        <property name="optional" value="true"/>
+    </module>
+
+    <!-- No trailing whitespace -->
+    <module name="RegexpSingleline">
+        <property name="format" value="\s+$"/>
+        <property name="message" value="Line has trailing whitespace."/>
+    </module>
+
+    <!-- Max line length: 120 (Spring convention) -->
+    <module name="LineLength">
+        <property name="max" value="120"/>
+        <property name="ignorePattern" value="^package.*|^import.*|a href|href|http://|https://|ftp://"/>
+    </module>
+
+    <module name="TreeWalker">
+
+        <!-- ===== IMPORTS ===== -->
+        <module name="AvoidStarImport"/>
+        <module name="RedundantImport"/>
+        <module name="UnusedImports"/>
+        <module name="IllegalImport">
+            <!-- Block legacy com.fasterxml.jackson — use tools.jackson (Jackson 3.x) -->
+            <property name="illegalPkgs" value="com.fasterxml.jackson"/>
+        </module>
+
+        <!-- ===== NAMING ===== -->
+        <module name="TypeName"/>
+        <module name="MethodName"/>
+        <module name="ParameterName"/>
+        <module name="LocalVariableName"/>
+        <module name="MemberName"/>
+        <module name="StaticVariableName"/>
+        <module name="ConstantName">
+            <!-- Allow lowercase 'log' for SLF4J loggers (Spring convention) -->
+            <property name="format" value="^log$|^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$"/>
+        </module>
+        <module name="PackageName">
+            <property name="format" value="^[a-z]+(\.[a-z][a-z0-9]*)*$"/>
+        </module>
+
+        <!-- ===== CODE QUALITY ===== -->
+        <!-- No empty blocks (catch, if, etc.) -->
+        <module name="EmptyBlock">
+            <property name="option" value="TEXT"/>
+            <property name="tokens" value="LITERAL_WHILE, LITERAL_TRY, LITERAL_CATCH,
+                LITERAL_FINALLY, LITERAL_DO, LITERAL_FOR, LITERAL_SWITCH,
+                LITERAL_SYNCHRONIZED, INSTANCE_INIT"/>
+        </module>
+
+        <!-- No empty catch blocks without a comment -->
+        <module name="EmptyCatchBlock">
+            <property name="exceptionVariableName" value="expected|ignore"/>
+        </module>
+
+        <!-- No unnecessary semicolons -->
+        <module name="EmptyStatement"/>
+
+        <!-- Equals must use .equals(), not == for objects -->
+        <module name="EqualsHashCode"/>
+
+        <!-- No fall-through in switch without a comment -->
+        <module name="FallThrough"/>
+
+        <!-- Modifier order: public protected private abstract static final ... -->
+        <module name="ModifierOrder"/>
+
+        <!-- No redundant modifiers (e.g., public in interfaces) -->
+        <module name="RedundantModifier"/>
+
+        <!-- One statement per line -->
+        <module name="OneStatementPerLine"/>
+
+        <!-- No multiple variable declarations per line -->
+        <module name="MultipleVariableDeclarations"/>
+
+        <!-- Braces always required for control flow -->
+        <module name="NeedBraces"/>
+
+        <!-- Left brace on same line -->
+        <module name="LeftCurly"/>
+
+        <!-- Right brace on own line -->
+        <module name="RightCurly"/>
+
+        <!-- ===== INDENTATION (4-space, Spring convention) ===== -->
+        <module name="Indentation">
+            <property name="basicOffset" value="4"/>
+            <property name="braceAdjustment" value="0"/>
+            <property name="caseIndent" value="4"/>
+            <property name="throwsIndent" value="8"/>
+            <property name="lineWrappingIndentation" value="8"/>
+            <property name="arrayInitIndent" value="4"/>
+        </module>
+
+        <!-- ===== MISCELLANEOUS ===== -->
+        <!-- No System.out/err — use SLF4J -->
+        <module name="Regexp">
+            <property name="format" value="System\.(out|err)\.print"/>
+            <property name="illegalPattern" value="true"/>
+            <property name="message" value="Use SLF4J logger instead of System.out/err."/>
+        </module>
+
+        <!-- No printStackTrace() — log properly -->
+        <module name="Regexp">
+            <property name="format" value="\.printStackTrace\(\)"/>
+            <property name="illegalPattern" value="true"/>
+            <property name="message" value="Use SLF4J logger instead of printStackTrace()."/>
+        </module>
+
+    </module>
+</module>
