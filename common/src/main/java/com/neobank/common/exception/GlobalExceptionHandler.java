@@ -1,5 +1,6 @@
 package com.neobank.common.exception;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -9,6 +10,13 @@ import java.net.URI;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private final String errorBaseUrl;
+
+    public GlobalExceptionHandler(
+            @Value("${neobank.error.base-url:https://neobank.com/errors}") String errorBaseUrl) {
+        this.errorBaseUrl = errorBaseUrl;
+    }
 
     @ExceptionHandler(ConflictException.class)
     public ProblemDetail handleConflict(ConflictException ex) {
@@ -37,9 +45,8 @@ public class GlobalExceptionHandler {
 
     private ProblemDetail problem(HttpStatus status, String errorCode, String detail) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(status, detail);
-        pd.setType(URI.create("https://neobank.com/errors/" + errorCode.toLowerCase().replace('_', '-')));
+        pd.setType(URI.create(errorBaseUrl + "/" + errorCode.toLowerCase().replace('_', '-')));
         pd.setProperty("code", errorCode);
         return pd;
     }
 }
-

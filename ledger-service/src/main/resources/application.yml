@@ -17,3 +17,7 @@ server:
 
 logging:
   config: classpath:logback-spring.xml
+
+neobank:
+  error:
+    base-url: ${ERROR_BASE_URL:https://neobank.com/errors}
