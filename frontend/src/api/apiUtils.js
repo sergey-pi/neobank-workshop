@@ -17,6 +17,23 @@ export async function parseApiError(res) {
 
 /** Default request timeout in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 10_000;
+const AUTH_STORAGE_KEYS = ['accessToken', 'userId', 'email'];
+
+export function clearAuthSession() {
+  AUTH_STORAGE_KEYS.forEach((key) => sessionStorage.removeItem(key));
+}
+
+export function getAuthHeader() {
+  const token = sessionStorage.getItem('accessToken');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function handleUnauthorized() {
+  clearAuthSession();
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.replace('/login');
+  }
+}
 
 /**
  * fetch() with an automatic AbortController timeout.
