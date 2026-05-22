@@ -267,6 +267,31 @@ All error responses follow [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7
 
 ## Development
 
+### E2E Smoke Test
+
+Runs the full P2P flow against locally running services (requires `curl`, `jq`, and `psql`):
+
+```bash
+# Start all services first (PostgreSQL + Redis + all 3 Spring Boot apps)
+./scripts/e2e-smoke.sh
+
+# Override service URLs if needed
+BASE_USER=http://localhost:8081 \
+BASE_LEDGER=http://localhost:8082 \
+BASE_PAYMENT=http://localhost:8083 \
+./scripts/e2e-smoke.sh
+```
+
+**What the script tests:**
+1. Health checks on all 3 services
+2. Register Alice & Bob (idempotent — 409 on re-run is OK)
+3. Create ledger accounts for both users
+4. Approve Alice's KYC + seed her balance via `psql` (requires local PostgreSQL access)
+5. Transfer Alice → Bob via ledger-service
+6. Verify Alice's balance decreased and Bob's balance increased
+7. Submit a payment order via payment-service
+8. Verify idempotency: same `idempotencyKey` returns the same `orderId`
+
 ### Run tests
 
 ```bash
