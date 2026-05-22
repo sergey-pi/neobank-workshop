@@ -98,7 +98,7 @@ class PaymentServiceIntegrationTest {
     void outboxPoller_processesEvent_marksProcessed() throws Exception {
         // 1. Submit a payment — creates a PENDING outbox entry
         PaymentRequest request = new PaymentRequest(
-                UUID.randomUUID(), UUID.randomUUID(), 1000L, "USD", "Outbox test");
+                UUID.randomUUID(), UUID.randomUUID(), 1000L, "USD", "Outbox test", null);
 
         MvcResult result = mockMvc.perform(post("/api/v1/payments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -135,7 +135,7 @@ class PaymentServiceIntegrationTest {
     void outboxPoller_backoff_setsNextRetryAtOnFailure() throws Exception {
         // Submit a payment to get a PENDING outbox row
         PaymentRequest request = new PaymentRequest(
-                UUID.randomUUID(), UUID.randomUUID(), 2000L, "USD", "Back-off test");
+                UUID.randomUUID(), UUID.randomUUID(), 2000L, "USD", "Back-off test", null);
 
         MvcResult result = mockMvc.perform(post("/api/v1/payments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -174,7 +174,7 @@ class PaymentServiceIntegrationTest {
     void outboxPoller_idempotent_alreadyProcessed() throws Exception {
         // Submit payment and process it once
         PaymentRequest request = new PaymentRequest(
-                UUID.randomUUID(), UUID.randomUUID(), 500L, "USD", "Idempotency test");
+                UUID.randomUUID(), UUID.randomUUID(), 500L, "USD", "Idempotency test", null);
 
         mockMvc.perform(post("/api/v1/payments")
                         .contentType(MediaType.APPLICATION_JSON)

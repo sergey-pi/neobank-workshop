@@ -126,7 +126,7 @@ public class UserService {
     public KycStatusResponse getKycStatus(UUID userId) {
         // Check Redis first — avoids a DB query on repeated calls (e.g., from ledger-service KYC gate)
         return kycStatusCache.get(userId)
-                .map(status -> new KycStatusResponse(userId, status))
+                .map(status -> new KycStatusResponse(userId, KycStatus.valueOf(status)))
                 .orElseGet(() -> {
                     String kycStatus = dsl.select(UserProfiles.USER_PROFILES.KYC_STATUS)
                             .from(UserProfiles.USER_PROFILES)

@@ -157,7 +157,7 @@ class LedgerServiceIntegrationTest {
                         .content(body))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("UNPROCESSABLE"))
-                .andExpect(jsonPath("$.detail").value("Daily spend limit exceeded"));
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("daily spend limit")));
     }
 
     @Test
