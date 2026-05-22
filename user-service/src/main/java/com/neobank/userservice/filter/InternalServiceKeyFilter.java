@@ -1,5 +1,6 @@
 package com.neobank.userservice.filter;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -13,6 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Validates the {@code X-Service-Key} header on the internal {@code /kyc-status} endpoint.
@@ -21,8 +24,9 @@ import java.io.IOException;
  * must not be accessible by unauthenticated external callers. This filter rejects requests
  * to {@code {userId}/kyc-status} that do not carry the shared internal service key.</p>
  *
- * <p>When {@code security.internal-service-key} is empty or not configured (e.g. in local dev
- * or tests), this filter is disabled and all requests pass through.</p>
+ * <p><strong>Production requirement:</strong> Set {@code INTERNAL_SERVICE_KEY} to a strong
+ * random secret in all environments. When the key is not configured, the filter passes all
+ * requests and logs a startup warning — the {@code /kyc-status} endpoint is UNPROTECTED.</p>
  */
 @Component
 public class InternalServiceKeyFilter implements Filter {
@@ -40,6 +44,14 @@ public class InternalServiceKeyFilter implements Filter {
         this.internalServiceKey = internalServiceKey;
     }
 
+    @PostConstruct
+    void validate() {
+        if (internalServiceKey.isEmpty()) {
+            log.warn("SECURITY WARNING: security.internal-service-key is not configured. "
+                    + "/kyc-status endpoint is UNPROTECTED. Set INTERNAL_SERVICE_KEY in production.");
+        }
+    }
+
     @Override
     public void doFilter(ServletRequest req, ServletResponse resp, FilterChain chain)
             throws IOException, ServletException {
@@ -53,7 +65,7 @@ public class InternalServiceKeyFilter implements Filter {
         }
 
         String provided = httpReq.getHeader(SERVICE_KEY_HEADER);
-        if (!internalServiceKey.equals(provided)) {
+        if (provided == null || !constantTimeEquals(internalServiceKey, provided)) {
             String safeUri = httpReq.getRequestURI().replaceAll("[\r\n]", "_");
             log.warn("Rejected unauthenticated request to {} from {}",
                     safeUri, httpReq.getRemoteAddr());
@@ -64,5 +76,12 @@ public class InternalServiceKeyFilter implements Filter {
         }
 
         chain.doFilter(req, resp);
+    }
+
+    /** Constant-time string comparison to prevent timing oracle attacks. */
+    private static boolean constantTimeEquals(String expected, String actual) {
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8));
     }
 }
