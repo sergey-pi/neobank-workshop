@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getAccounts, createAccount } from '../api/ledgerApi.js';
 import { getKycStatus } from '../api/userApi.js';
 import KycBadge from '../components/KycBadge.jsx';
+import { useAuth } from '../auth/authContext.jsx';
 
 function formatAmount(minor) {
   return (minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 });
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
+  const { auth, logout } = useAuth();
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -75,9 +79,20 @@ export default function DashboardPage() {
     }
   }
 
+  function handleLogout() {
+    logout();
+    navigate('/login', { replace: true });
+  }
+
   return (
     <>
-      <h1 className="page-title">Dashboard</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+        <div>
+          <h1 className="page-title" style={{ marginBottom: 4 }}>Dashboard</h1>
+          {auth?.email && <div className="text-muted">Signed in as {auth.email}</div>}
+        </div>
+        <button className="btn btn-outline" type="button" onClick={handleLogout}>Logout</button>
+      </div>
 
       {/* Accounts */}
       <div className="card">

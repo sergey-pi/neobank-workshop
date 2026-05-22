@@ -15,10 +15,10 @@ export default function RegisterPage() {
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
-  // Navigate to dashboard after successful registration; effect handles cleanup on unmount.
+  // Navigate to login after successful registration; effect handles cleanup on unmount.
   useEffect(() => {
     if (!success) return;
-    const t = setTimeout(() => navigate('/dashboard'), 2000);
+    const t = setTimeout(() => navigate('/login'), 2000);
     return () => clearTimeout(t);
   }, [success, navigate]);
 
@@ -28,7 +28,7 @@ export default function RegisterPage() {
     setError(null);
     try {
       await registerUser(form);
-      setSuccess('Account created! Redirecting to dashboard…');
+      setSuccess('Account created! Redirecting to sign in…');
     } catch (err) {
       setError(err?.detail ?? err?.message ?? 'Registration failed');
     } finally {
