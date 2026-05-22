@@ -14,3 +14,27 @@ export async function parseApiError(res) {
   Object.assign(err, body);
   return err;
 }
+
+/** Default request timeout in milliseconds. */
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+/**
+ * fetch() with an automatic AbortController timeout.
+ * Throws a DOMException with name 'AbortError' if the timeout is exceeded.
+ */
+export async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms`);
+      timeoutErr.status = 408;
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
