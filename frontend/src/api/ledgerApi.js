@@ -28,8 +28,8 @@ export async function transfer(data) {
   return res.json();
 }
 
-export async function getTransactions() {
-  const res = await fetchWithTimeout('/api/v1/transactions');
+export async function getTransactions(page = 0, size = 20) {
+  const res = await fetchWithTimeout(`/api/v1/transactions?page=${page}&size=${size}`);
   if (!res.ok) throw await parseApiError(res);
   return res.json();
 }
