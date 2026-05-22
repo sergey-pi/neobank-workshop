@@ -1,6 +1,7 @@
 package com.neobank.ledgerservice.gateway;
 
 import com.neobank.common.exception.ForbiddenException;
+import com.neobank.common.model.KycStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,11 +19,10 @@ import java.util.UUID;
 public class KycGateway {
 
     private static final Logger log = LoggerFactory.getLogger(KycGateway.class);
-    private static final String KYC_APPROVED = "APPROVED";
 
     private final RestClient restClient;
 
-    public KycGateway(@Value("${services.user-service.base-url:http://localhost:8081}") String userServiceBaseUrl) {
+    public KycGateway(@Value("${services.user-service.base-url}") String userServiceBaseUrl) {
         this.restClient = RestClient.builder()
                 .baseUrl(userServiceBaseUrl)
                 .build();
@@ -40,8 +40,8 @@ public class KycGateway {
                     .retrieve()
                     .body(KycStatusResponse.class);
 
-            if (response == null || !KYC_APPROVED.equalsIgnoreCase(response.kycStatus())) {
-                String status = response == null ? "unknown" : response.kycStatus();
+            if (response == null || response.kycStatus() != KycStatus.APPROVED) {
+                KycStatus status = response == null ? null : response.kycStatus();
                 throw new ForbiddenException(
                         "Transfer denied: KYC not approved for user " + userId + " (status: " + status + ")");
             }
@@ -52,6 +52,6 @@ public class KycGateway {
         }
     }
 
-    private record KycStatusResponse(UUID userId, String kycStatus) {
+    private record KycStatusResponse(UUID userId, KycStatus kycStatus) {
     }
 }

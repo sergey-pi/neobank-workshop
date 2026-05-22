@@ -22,6 +22,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RateLimiterFilter implements Filter {
 
     private static final String RATE_LIMITED_PATH = "/api/v1/users/register";
+    private static final int RETRY_AFTER_SECONDS = 60;
+    private static final long WINDOW_MILLIS = RETRY_AFTER_SECONDS * 1000L;
+    private static final String RATE_LIMIT_RESPONSE_BODY = """
+            {"status":429,"code":"TOO_MANY_REQUESTS",\
+            "detail":"Rate limit exceeded. Try again in %d seconds."}""".formatted(RETRY_AFTER_SECONDS);
 
     @Value("${security.rate-limit.requests-per-minute:10}")
     private int requestsPerMinute;
@@ -41,11 +46,9 @@ public class RateLimiterFilter implements Filter {
             String clientIp = resolveClientIp(httpReq);
             if (isRateLimited(clientIp)) {
                 httpResp.setStatus(429);
-                httpResp.setHeader("Retry-After", "60");
+                httpResp.setHeader("Retry-After", String.valueOf(RETRY_AFTER_SECONDS));
                 httpResp.setContentType("application/json");
-                httpResp.getWriter().write(
-                        "{\"status\":429,\"code\":\"TOO_MANY_REQUESTS\","
-                        + "\"detail\":\"Rate limit exceeded. Try again in 60 seconds.\"}");
+                httpResp.getWriter().write(RATE_LIMIT_RESPONSE_BODY);
                 return;
             }
         }
@@ -54,7 +57,7 @@ public class RateLimiterFilter implements Filter {
 
     private boolean isRateLimited(String clientIp) {
         long now = System.currentTimeMillis();
-        long windowStart = now - 60_000L;
+        long windowStart = now - WINDOW_MILLIS;
 
         timestamps.compute(clientIp, (ip, existing) -> {
             long[] base = existing == null ? new long[0] : existing;
