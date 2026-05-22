@@ -54,8 +54,9 @@ public class InternalServiceKeyFilter implements Filter {
 
         String provided = httpReq.getHeader(SERVICE_KEY_HEADER);
         if (!internalServiceKey.equals(provided)) {
+            String safeUri = httpReq.getRequestURI().replaceAll("[\r\n]", "_");
             log.warn("Rejected unauthenticated request to {} from {}",
-                    httpReq.getRequestURI(), httpReq.getRemoteAddr());
+                    safeUri, httpReq.getRemoteAddr());
             httpResp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             httpResp.setContentType("application/json");
             httpResp.getWriter().write(UNAUTHORIZED_BODY);
