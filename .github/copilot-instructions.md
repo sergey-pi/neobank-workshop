@@ -85,8 +85,27 @@ In the ledger `entries` table: **negative** amounts = debit (outflow), **positiv
 ### JSONB Fields
 Several tables use JSONB for extensibility: `users.flags` (feature flags), `payment_orders.destination_details` (routing data), `transactions.metadata`, `user_settings.custom_settings`. Use `JSONB.valueOf(...)` from jOOQ when inserting.
 
-### Security (user-service only)
-Spring Security is configured only in `user-service`. CSRF is disabled. `/health` and `/api/v1/users/**` are open. Passwords are hashed with BCrypt via the `PasswordEncoder` bean.
+### Enums Over Magic Strings
+Status values (`PENDING`, `APPROVED`, `REJECTED`, etc.) must be Java enums, even when stored as plain strings in the database. Shared status enums live in the `common` module under `com.neobank.common.model`. Convert at the DB boundary: `KycStatus.valueOf(dbString)` on read, `.name()` on write. Never use raw string comparisons like `"APPROVED".equals(status)`.
+
+### Config Defaults Belong in `application.yml`
+Use `@Value("${my.prop}")` — never `@Value("${my.prop:hardcoded-default}")`. The `application.yml` is the single source of truth for defaults; inline fallbacks in annotations make defaults invisible to operators and inconsistent across environments.
+
+### No Magic Numbers or Strings
+Extract any literal used more than once (timeouts, limits, retry intervals, status codes, path patterns) as a named `private static final` constant at the top of the class. Example: `RETRY_AFTER_SECONDS = 60` referenced by both the `Retry-After` header and the window calculation.
+
+### Java Text Blocks for Multi-Line Strings
+Use `"""..."""` text blocks for inline JSON, multi-line error messages, or any string spanning multiple lines. Never use `+` string concatenation across lines.
+
+### Tests Are Mandatory
+Every code change must include or update integration tests:
+- New service method → happy path test + at least one error case
+- Bug fix → regression test that would have caught the bug
+- New exception mapping → assert exact status code and `$.code` field
+Run `./mvnw test -pl <service>` locally before pushing.
+
+### Document All Logic
+Public classes and non-trivial methods must have Javadoc explaining *why*, not just *what*. Multi-step logic (e.g. the 9-step transfer order) must have numbered inline comments. Never leave `// TODO` or vague placeholder comments in committed code.
 
 ## Database Credentials (local dev)
 
