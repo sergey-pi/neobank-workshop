@@ -5,26 +5,44 @@ import com.neobank.common.model.KycStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.UUID;
 
 /**
  * Calls user-service to verify a user's KYC status before allowing transfers.
- * Uses synchronous RestClient with a short timeout configured at bean level.
+ *
+ * <p>Uses synchronous RestClient with explicit connect (2 s) and read (5 s) timeouts
+ * to prevent thread exhaustion if user-service is slow or unresponsive.</p>
+ *
+ * <p>This gateway is intentionally called <em>outside</em> the {@code @Transactional}
+ * boundary of {@code LedgerService.transfer()} — holding an open DB connection during
+ * a network call would exhaust the connection pool under load.</p>
  */
 @Component
 public class KycGateway {
 
     private static final Logger log = LoggerFactory.getLogger(KycGateway.class);
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
 
     private final RestClient restClient;
 
     public KycGateway(@Value("${services.user-service.base-url}") String userServiceBaseUrl) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(READ_TIMEOUT);
+
         this.restClient = RestClient.builder()
                 .baseUrl(userServiceBaseUrl)
+                .requestFactory(factory)
                 .build();
     }
 

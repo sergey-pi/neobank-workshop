@@ -137,6 +137,7 @@ class LedgerServiceIntegrationTest {
     void transfer_exceedsDailySpendLimit_returns422() throws Exception {
         UUID sender = createAccount(UUID.randomUUID());
         UUID receiver = createAccount(UUID.randomUUID());
+        // Fund enough for 6 transfers of 900_000 (5_400_000 total > 5_000_000 daily limit)
         fundAccount(sender, 6_000_000L);
 
         TransferRequest request = new TransferRequest(sender, receiver, 900_000L, "USD", "daily spend test");
