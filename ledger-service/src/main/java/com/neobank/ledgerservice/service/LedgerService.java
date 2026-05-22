@@ -2,6 +2,7 @@ package com.neobank.ledgerservice.service;
 
 import com.neobank.common.exception.UnprocessableException;
 import com.neobank.ledgerservice.cache.SpendCounterCache;
+import com.neobank.ledgerservice.cache.TransferIdempotencyCache;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
 import com.neobank.ledgerservice.gateway.KycGateway;
@@ -10,6 +11,7 @@ import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
 import com.neobank.ledgerservice.jooq.tables.records.BalancesRecord;
+import com.neobank.ledgerservice.jooq.tables.records.TransactionsRecord;
 import org.jooq.DSLContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -60,6 +63,7 @@ public class LedgerService {
     private final DSLContext dsl;
     private final KycGateway kycGateway;
     private final SpendCounterCache spendCounterCache;
+    private final TransferIdempotencyCache idempotencyCache;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${security.limits.max-transfer-amount}")
@@ -69,22 +73,43 @@ public class LedgerService {
     private long dailySpendLimit;
 
     public LedgerService(DSLContext dsl, KycGateway kycGateway,
-                         SpendCounterCache spendCounterCache, PlatformTransactionManager txManager) {
+                         SpendCounterCache spendCounterCache,
+                         TransferIdempotencyCache idempotencyCache,
+                         PlatformTransactionManager txManager) {
         this.dsl = dsl;
         this.kycGateway = kycGateway;
         this.spendCounterCache = spendCounterCache;
+        this.idempotencyCache = idempotencyCache;
         this.transactionTemplate = new TransactionTemplate(txManager);
     }
 
     /**
-     * Executes a P2P transfer. Steps 1–4 run outside any transaction so the KYC
-     * HTTP call and Redis check do not hold a DB connection. Steps 5–13 run atomically
-     * inside a {@link TransactionTemplate}. Step 14 runs after the DB commit.
+     * Executes a P2P transfer with optional idempotency.
      *
-     * @param request transfer parameters (amounts in minor units)
+     * <p>If {@code idempotencyKey} is provided, the flow is:
+     * <ol>
+     *   <li>Redis cache hit → return cached response immediately (no DB)</li>
+     *   <li>Redis cache miss → proceed with transfer</li>
+     *   <li>DB-level unique index on {@code idempotency_key} is the authoritative guard:
+     *       concurrent requests with the same key get {@code ON CONFLICT DO NOTHING},
+     *       which fetches and returns the existing transaction.</li>
+     *   <li>On success, store transactionId in Redis for future fast-path hits.</li>
+     * </ol></p>
+     *
+     * @param request        transfer parameters (amounts in minor units)
+     * @param idempotencyKey optional client-supplied idempotency key (from {@code Idempotency-Key} header)
      * @return completed transfer summary
      */
-    public TransferResponse transfer(TransferRequest request) {
+    public TransferResponse transfer(TransferRequest request, String idempotencyKey) {
+        // Redis fast-path: return cached result without any DB work.
+        if (idempotencyKey != null) {
+            Optional<String> cached = idempotencyCache.get(idempotencyKey);
+            if (cached.isPresent()) {
+                log.debug("Idempotency cache hit for key={}", idempotencyKey);
+                return new TransferResponse(UUID.fromString(cached.get()), "COMPLETED",
+                        "Transfer already processed");
+            }
+        }
         // 1. Per-transaction limit check — fast fail before any I/O.
         if (request.amount() > maxTransferAmount) {
             log.warn("Transfer rejected: amount {} exceeds per-transaction limit {} for account {}",
@@ -119,12 +144,18 @@ public class LedgerService {
         }
 
         // Steps 5–13: all DB writes are atomic inside one transaction.
-        TransferResponse result = transactionTemplate.execute(status -> executeTransfer(request));
+        TransferResponse result = transactionTemplate.execute(
+                status -> executeTransfer(request, idempotencyKey));
 
         // 14. Atomically increment the Redis daily spend counter after DB commit.
         //     TTL is 25 hours so the key expires shortly after midnight UTC.
         //     Failures are silently swallowed — the SQL fallback in step 4 covers future requests.
         spendCounterCache.incrementAndGet(request.fromAccountId(), request.amount());
+
+        // Store in idempotency cache after successful commit so future requests get fast-path.
+        if (idempotencyKey != null && result != null) {
+            idempotencyCache.putIfAbsent(idempotencyKey, result.transactionId().toString());
+        }
 
         return result;
     }
@@ -133,7 +164,7 @@ public class LedgerService {
      * Inner transactional body. Runs inside the {@link TransactionTemplate} opened
      * by {@link #transfer}. Any unchecked exception causes automatic rollback.
      */
-    private TransferResponse executeTransfer(TransferRequest request) {
+    private TransferResponse executeTransfer(TransferRequest request, String idempotencyKey) {
         // 5. Lock fromAccount balance row with SELECT FOR UPDATE.
         //    Establishes consistent ordering and prevents double-spend.
         BalancesRecord fromBalance = dsl.selectFrom(Balances.BALANCES)
@@ -198,14 +229,31 @@ public class LedgerService {
 
         UUID transactionId = UUID.randomUUID();
 
-        // 10. Insert Transaction as PENDING — marked COMPLETED only after all writes succeed.
-        dsl.insertInto(Transactions.TRANSACTIONS)
+        // 10. Insert Transaction as PENDING with optional idempotency key.
+        //     ON CONFLICT (idempotency_key) DO NOTHING is the authoritative DB-level guard:
+        //     if two concurrent requests arrive with the same key, only one inserts; the other
+        //     gets 0 rows inserted and we return the existing transaction instead.
+        int inserted = dsl.insertInto(Transactions.TRANSACTIONS)
                 .set(Transactions.TRANSACTIONS.ID, transactionId)
                 .set(Transactions.TRANSACTIONS.REFERENCE, UUID.randomUUID().toString())
                 .set(Transactions.TRANSACTIONS.TYPE, "P2P_TRANSFER")
                 .set(Transactions.TRANSACTIONS.STATUS, "PENDING")
                 .set(Transactions.TRANSACTIONS.DESCRIPTION, request.description())
+                .set(Transactions.TRANSACTIONS.IDEMPOTENCY_KEY, idempotencyKey)
+                .onConflict(Transactions.TRANSACTIONS.IDEMPOTENCY_KEY)
+                .doNothing()
                 .execute();
+
+        if (inserted == 0) {
+            // Duplicate idempotency key — return the already-committed transaction.
+            TransactionsRecord existing = dsl.selectFrom(Transactions.TRANSACTIONS)
+                    .where(Transactions.TRANSACTIONS.IDEMPOTENCY_KEY.eq(idempotencyKey))
+                    .fetchOne();
+            if (existing != null) {
+                return new TransferResponse(existing.getId(), existing.getStatus(),
+                        "Transfer already processed");
+            }
+        }
 
         // 11. Insert double-entry ledger entries.
         dsl.insertInto(Entries.ENTRIES)
