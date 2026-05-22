@@ -16,6 +16,7 @@ export default function HistoryPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    setLoading(true);
     getTransactions()
       .then(setTransactions)
       .catch(() => setError('Could not load transactions — is ledger-service running?'))

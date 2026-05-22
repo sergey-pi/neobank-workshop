@@ -37,7 +37,15 @@ export default function DashboardPage() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+    getAccounts()
+      .then((data) => { if (isMounted) setAccounts(data); })
+      .catch(() => { if (isMounted) setError('Could not load accounts — is ledger-service running?'); })
+      .finally(() => { if (isMounted) setLoading(false); });
+    return () => { isMounted = false; };
+  }, []);
 
   async function handleCreate(e) {
     e.preventDefault();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { registerUser } from '../api/userApi.js';
 
@@ -15,14 +15,20 @@ export default function RegisterPage() {
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  // Navigate to dashboard after successful registration; effect handles cleanup on unmount.
+  useEffect(() => {
+    if (!success) return;
+    const t = setTimeout(() => navigate('/dashboard'), 2000);
+    return () => clearTimeout(t);
+  }, [success, navigate]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const user = await registerUser(form);
-      setSuccess(`Registered! User ID: ${user.id}`);
-      setTimeout(() => navigate('/dashboard'), 2000);
+      await registerUser(form);
+      setSuccess('Account created! Redirecting to dashboard…');
     } catch (err) {
       setError(err?.detail ?? err?.message ?? 'Registration failed');
     } finally {

@@ -1,6 +1,14 @@
 import { useState } from 'react';
 import { transfer } from '../api/ledgerApi.js';
 
+/** Converts a decimal major-unit string (e.g. "10.57") to integer minor units (cents).
+ *  Uses string splitting to avoid floating-point precision loss (0.57 * 100 = 56.999…). */
+function toMinorUnits(amount) {
+  if (!amount) return 0;
+  const [intPart, fracPart = ''] = String(amount).split('.');
+  return Number(intPart) * 100 + Number(fracPart.padEnd(2, '0').slice(0, 2));
+}
+
 function formatAmount(minor) {
   return (minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 });
 }
@@ -23,7 +31,12 @@ export default function TransferPage() {
     setResult(null);
     try {
       // amount field is in major units (e.g. 10.50); convert to minor units (cents)
-      const amountMinor = Math.round(parseFloat(form.amount) * 100);
+      const amountMinor = toMinorUnits(form.amount);
+      if (!amountMinor || amountMinor <= 0) {
+        setError('Please enter a valid amount greater than zero');
+        setLoading(false);
+        return;
+      }
       const res = await transfer({ ...form, amount: amountMinor });
       setResult(res);
     } catch (err) {
@@ -79,7 +92,7 @@ export default function TransferPage() {
 
           <div className="mt-16">
             <button className="btn btn-primary" type="submit" disabled={loading}>
-              {loading ? 'Sending…' : `Transfer ${form.amount ? formatAmount(Math.round(parseFloat(form.amount || 0) * 100)) : '0.00'} ${form.currency}`}
+              {loading ? 'Sending…' : `Transfer ${form.amount ? formatAmount(toMinorUnits(form.amount)) : '0.00'} ${form.currency}`}
             </button>
           </div>
         </form>
