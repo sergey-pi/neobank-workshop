@@ -17,8 +17,10 @@ import java.util.List;
 /**
  * Polls {@code payment_outbox} for PENDING events and dispatches them.
  *
- * <p><b>Concurrency safety:</b> {@code SELECT FOR UPDATE SKIP LOCKED} ensures
- * multiple running instances never process the same row simultaneously.</p>
+ * <p><b>Concurrency safety:</b> Each event is fetched and processed in a single
+ * transaction. The {@code SELECT FOR UPDATE SKIP LOCKED} lock is held through
+ * the dispatch and status UPDATE, so concurrent poller instances can never
+ * double-process the same row — the lock is only released on commit.</p>
  *
  * <p><b>Transaction management:</b> {@code poll()} is intentionally not
  * transactional. Each event gets its own transaction via {@link TransactionTemplate}
@@ -29,9 +31,9 @@ import java.util.List;
  * <p><b>Exponential back-off:</b> on failure, {@code next_retry_at} is set to
  * {@code now + retryBaseDelaySeconds * 2^(retryCount - 1)}:
  * <pre>
- *   attempt 1 → wait retryBaseDelaySeconds      (e.g. 30 s)
- *   attempt 2 → wait retryBaseDelaySeconds * 2   (e.g. 60 s)
- *   attempt 3 → wait retryBaseDelaySeconds * 4   (e.g. 120 s) → FAILED
+ *   attempt 1 -> wait retryBaseDelaySeconds      (e.g. 30 s)
+ *   attempt 2 -> wait retryBaseDelaySeconds * 2   (e.g. 60 s)
+ *   attempt 3 -> wait retryBaseDelaySeconds * 4   (e.g. 120 s) -> FAILED
  * </pre></p>
  *
  * <p><b>Observability:</b> {@code last_attempted_at} is stamped on every attempt
@@ -46,45 +48,81 @@ public class OutboxPoller {
     public static final String STATUS_PROCESSED = "PROCESSED";
     public static final String STATUS_FAILED = "FAILED";
 
+    private static final int BATCH_SIZE = 10;
+
     private final DSLContext dsl;
     private final TransactionTemplate transactionTemplate;
+    private final PaymentEventPublisher eventPublisher;
     private final int maxRetries;
     private final long retryBaseDelaySeconds;
 
     public OutboxPoller(
             DSLContext dsl,
             PlatformTransactionManager txManager,
+            PaymentEventPublisher eventPublisher,
             @Value("${outbox.poll.max-retries:3}") int maxRetries,
             @Value("${outbox.poll.retry-base-delay-seconds:30}") long retryBaseDelaySeconds) {
         this.dsl = dsl;
         this.transactionTemplate = new TransactionTemplate(txManager);
+        this.eventPublisher = eventPublisher;
         this.maxRetries = maxRetries;
         this.retryBaseDelaySeconds = retryBaseDelaySeconds;
     }
 
     /**
      * Scheduler entry point. Not transactional — each event gets its own
-     * transaction inside {@link #processSingle}.
+     * transaction inside {@link #pollOne}.
      */
     @Scheduled(fixedDelayString = "${outbox.poll.interval-ms:5000}")
     public void poll() {
-        List<PaymentOutboxRecord> events = fetchPendingBatch();
-        if (events.isEmpty()) {
-            return;
+        int processed = 0;
+        while (processed < BATCH_SIZE && pollOne()) {
+            processed++;
         }
-        log.debug("Outbox poller picked up {} event(s)", events.size());
-        for (PaymentOutboxRecord event : events) {
-            processSingle(event.getId().toString(), event);
+        if (processed > 0) {
+            log.debug("Outbox poller processed {} event(s)", processed);
         }
     }
 
     /**
-     * Fetches up to 10 PENDING events ready for processing.
+     * Selects, dispatches, and updates exactly one PENDING event in a single transaction.
      *
-     * <p>Skips rows inside their back-off window via
-     * {@code next_retry_at IS NULL OR next_retry_at <= NOW()}.
-     * {@code FOR UPDATE SKIP LOCKED} prevents concurrent instances from
-     * double-processing. Public for testing.</p>
+     * <p>The {@code SELECT FOR UPDATE SKIP LOCKED} is held for the full duration of the
+     * transaction through dispatch and status UPDATE, so concurrent poller instances
+     * cannot pick up the same row.</p>
+     *
+     * @return {@code true} if an event was found and processed, {@code false} if none remain
+     */
+    private boolean pollOne() {
+        Boolean result = transactionTemplate.execute(txStatus -> {
+            OffsetDateTime now = OffsetDateTime.now();
+
+            PaymentOutboxRecord event = dsl.selectFrom(PaymentOutbox.PAYMENT_OUTBOX)
+                    .where(PaymentOutbox.PAYMENT_OUTBOX.STATUS.eq(STATUS_PENDING))
+                    .and(PaymentOutbox.PAYMENT_OUTBOX.NEXT_RETRY_AT.isNull()
+                            .or(PaymentOutbox.PAYMENT_OUTBOX.NEXT_RETRY_AT.lessOrEqual(now)))
+                    .orderBy(PaymentOutbox.PAYMENT_OUTBOX.CREATED_AT.asc())
+                    .limit(1)
+                    .forUpdate()
+                    .skipLocked()
+                    .fetchOneInto(PaymentOutboxRecord.class);
+
+            if (event == null) {
+                return false;
+            }
+
+            executeDispatch(event.getId().toString(), event);
+            return true;
+        });
+        return Boolean.TRUE.equals(result);
+    }
+
+    /**
+     * Returns PENDING events ready for processing, without locking rows.
+     *
+     * <p>Used for observability checks and test assertions. Do NOT use for
+     * production processing — use {@link #poll()} which locks each row
+     * within a transaction.</p>
      */
     public List<PaymentOutboxRecord> fetchPendingBatch() {
         OffsetDateTime now = OffsetDateTime.now();
@@ -93,27 +131,13 @@ public class OutboxPoller {
                 .and(PaymentOutbox.PAYMENT_OUTBOX.NEXT_RETRY_AT.isNull()
                         .or(PaymentOutbox.PAYMENT_OUTBOX.NEXT_RETRY_AT.lessOrEqual(now)))
                 .orderBy(PaymentOutbox.PAYMENT_OUTBOX.CREATED_AT.asc())
-                .limit(10)
-                .forUpdate()
-                .skipLocked()
+                .limit(BATCH_SIZE)
                 .fetchInto(PaymentOutboxRecord.class);
     }
 
     /**
-     * Wraps a single event dispatch in an explicit {@link TransactionTemplate}.
-     *
-     * <p>Avoids Spring AOP self-invocation: {@code poll()} calls this directly
-     * on {@code this}, so proxy-based {@code @Transactional} would be bypassed.
-     * {@code TransactionTemplate} gives the same ACID guarantee without relying
-     * on the proxy.</p>
-     */
-    public void processSingle(String eventId, PaymentOutboxRecord event) {
-        transactionTemplate.executeWithoutResult(status -> executeDispatch(eventId, event));
-    }
-
-    /**
      * Dispatches the event and updates its outbox row. Runs inside a transaction
-     * opened by {@link #processSingle}.
+     * opened by {@link #pollOne}.
      *
      * <p>On success: {@code status=PROCESSED}, {@code processed_at},
      * {@code last_attempted_at} stamped, {@code next_retry_at} cleared.</p>
@@ -126,9 +150,7 @@ public class OutboxPoller {
     private void executeDispatch(String eventId, PaymentOutboxRecord event) {
         OffsetDateTime now = OffsetDateTime.now();
         try {
-            // TODO: replace with real event dispatch (Kafka, HTTP callback, etc.)
-            log.info("Processing outbox event id={} type={} aggregateId={}",
-                    event.getId(), event.getType(), event.getAggregateId());
+            eventPublisher.publish(event);
 
             dsl.update(PaymentOutbox.PAYMENT_OUTBOX)
                     .set(PaymentOutbox.PAYMENT_OUTBOX.STATUS, STATUS_PROCESSED)
@@ -143,7 +165,7 @@ public class OutboxPoller {
             boolean exhausted = nextRetry >= maxRetries;
             String newStatus = exhausted ? STATUS_FAILED : STATUS_PENDING;
 
-            // Exponential back-off: base * 2^(nextRetry - 1), e.g. 30 s → 60 s → 120 s
+            // Exponential back-off: base * 2^(nextRetry - 1), e.g. 30 s -> 60 s -> 120 s
             OffsetDateTime nextRetryAt = exhausted
                     ? null
                     : now.plusSeconds(retryBaseDelaySeconds * (1L << (nextRetry - 1)));
