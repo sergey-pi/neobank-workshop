@@ -1,6 +1,9 @@
 package com.neobank.userservice.service;
 
 import com.neobank.common.exception.ConflictException;
+import com.neobank.common.exception.NotFoundException;
+import com.neobank.common.model.KycStatus;
+import com.neobank.userservice.dto.KycStatusResponse;
 import com.neobank.userservice.dto.UserRegistrationRequest;
 import com.neobank.userservice.dto.UserResponse;
 import com.neobank.userservice.jooq.tables.UserAddresses;
@@ -27,7 +30,6 @@ public class UserService {
 
     @Transactional
     public UserResponse register(UserRegistrationRequest request) {
-        // 1. Check if user already exists
         boolean exists = dsl.fetchExists(dsl.selectFrom(Users.USERS).where(Users.USERS.EMAIL.eq(request.email())));
         if (exists) {
             throw new ConflictException("User with email " + request.email() + " already exists");
@@ -36,7 +38,6 @@ public class UserService {
         UUID userId = UUID.randomUUID();
         String encodedPassword = passwordEncoder.encode(request.password());
 
-        // 2. Create User record
         dsl.insertInto(Users.USERS)
                 .set(Users.USERS.ID, userId)
                 .set(Users.USERS.EMAIL, request.email())
@@ -46,7 +47,6 @@ public class UserService {
                 .set(Users.USERS.PLAN_TIER, "STANDARD")
                 .execute();
 
-        // 3. Create Profile record
         UUID profileId = UUID.randomUUID();
         dsl.insertInto(UserProfiles.USER_PROFILES)
                 .set(UserProfiles.USER_PROFILES.ID, profileId)
@@ -56,10 +56,9 @@ public class UserService {
                 .set(UserProfiles.USER_PROFILES.PHONE_NUMBER, request.phoneNumber())
                 .set(UserProfiles.USER_PROFILES.DATE_OF_BIRTH, request.dateOfBirth())
                 .set(UserProfiles.USER_PROFILES.KYC_STATUS, "PENDING")
-                .set(UserProfiles.USER_PROFILES.LEGAL_ENTITY, "NEOBANK_US") // Default for MVP
+                .set(UserProfiles.USER_PROFILES.LEGAL_ENTITY, "NEOBANK_US")
                 .execute();
 
-        // 4. Create Address record
         dsl.insertInto(UserAddresses.USER_ADDRESSES)
                 .set(UserAddresses.USER_ADDRESSES.ID, UUID.randomUUID())
                 .set(UserAddresses.USER_ADDRESSES.PROFILE_ID, profileId)
@@ -70,7 +69,6 @@ public class UserService {
                 .set(UserAddresses.USER_ADDRESSES.IS_ACTIVE, true)
                 .execute();
 
-        // 5. Create Settings record
         dsl.insertInto(UserSettings.USER_SETTINGS)
                 .set(UserSettings.USER_SETTINGS.USER_ID, userId)
                 .set(UserSettings.USER_SETTINGS.LANGUAGE, "en-US")
@@ -79,5 +77,17 @@ public class UserService {
                 .execute();
 
         return new UserResponse(userId, request.email(), request.firstName(), request.lastName(), "ACTIVE");
+    }
+
+    public KycStatusResponse getKycStatus(UUID userId) {
+        String kycStatus = dsl.select(UserProfiles.USER_PROFILES.KYC_STATUS)
+                .from(UserProfiles.USER_PROFILES)
+                .where(UserProfiles.USER_PROFILES.USER_ID.eq(userId))
+                .fetchOne(UserProfiles.USER_PROFILES.KYC_STATUS);
+
+        if (kycStatus == null) {
+            throw new NotFoundException("User profile not found for userId: " + userId);
+        }
+        return new KycStatusResponse(userId, KycStatus.valueOf(kycStatus));
     }
 }

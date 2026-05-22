@@ -49,3 +49,8 @@ brew services start postgresql@16    # macOS Homebrew
 5. **`common` first.** Any build that references `common` requires `./mvnw install -pl common -am` to run first.
 6. **Git workflow**: `WSNB - <message>` commit prefix, no Co-authored-by, branch per feature, PR per change.
 7. **Tests are mandatory.** Every code change must include or update integration tests. Run `./mvnw test -pl <service>` before pushing — a PR with failing or missing tests will not be merged.
+8. **Document all logic.** Public classes and non-trivial methods must have Javadoc. Include rationale, not just what the code does.
+9. **Enums over magic strings.** Status values (`PENDING`, `APPROVED`, `REJECTED`, etc.) must be Java enums even when stored as strings in the DB. Convert at the boundary: `KycStatus.valueOf(dbString)` on read, `.name()` on write.
+10. **Config defaults belong in `application.yml`, not in `@Value` annotations.** Use `@Value("${my.prop}")` — never `@Value("${my.prop:hardcoded-default}")`. The yml is the single source of truth for defaults; code should not carry fallback values.
+11. **No magic numbers or strings.** Extract all literals used more than once (timeouts, limits, retry intervals, status codes) as named `private static final` constants at the top of the class.
+12. **Java text blocks for multi-line strings.** Use `"""..."""` text blocks for inline JSON, SQL snippets, or any string spanning multiple lines. Never concatenate strings with `+` across lines.
