@@ -1,11 +1,15 @@
 package com.neobank.ledgerservice.controller;
 
+import com.neobank.common.exception.UnauthorizedException;
 import com.neobank.ledgerservice.dto.PagedResponse;
 import com.neobank.ledgerservice.dto.TransactionResponse;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
+import com.neobank.ledgerservice.jooq.tables.Accounts;
+import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
 import com.neobank.ledgerservice.service.LedgerService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @Validated
 @RestController
@@ -46,23 +51,60 @@ public class TransactionController {
 
     @GetMapping
     public PagedResponse<TransactionResponse> getTransactions(
+            HttpServletRequest httpRequest,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) @Min(1) @Max(MAX_PAGE_SIZE) int size) {
+        UUID userId = requireUserId(httpRequest);
 
-        long total = dsl.fetchCount(Transactions.TRANSACTIONS);
+        Long totalCount = dsl.selectCount()
+                .from(Transactions.TRANSACTIONS)
+                .join(Entries.ENTRIES).on(Entries.ENTRIES.TRANSACTION_ID.eq(Transactions.TRANSACTIONS.ID))
+                .join(Accounts.ACCOUNTS).on(Accounts.ACCOUNTS.ID.eq(Entries.ENTRIES.ACCOUNT_ID))
+                .where(Accounts.ACCOUNTS.USER_ID.eq(userId))
+                .fetchOne(0, Long.class);
+        long total = totalCount != null ? totalCount : 0L;
 
-        List<TransactionResponse> items = dsl.selectFrom(Transactions.TRANSACTIONS)
+        List<TransactionResponse> items = dsl
+                .select(
+                        Transactions.TRANSACTIONS.ID,
+                        Transactions.TRANSACTIONS.REFERENCE,
+                        Transactions.TRANSACTIONS.TYPE,
+                        Transactions.TRANSACTIONS.STATUS,
+                        Transactions.TRANSACTIONS.DESCRIPTION,
+                        Transactions.TRANSACTIONS.CREATED_AT,
+                        Entries.ENTRIES.AMOUNT,
+                        Accounts.ACCOUNTS.CURRENCY)
+                .from(Transactions.TRANSACTIONS)
+                .join(Entries.ENTRIES).on(Entries.ENTRIES.TRANSACTION_ID.eq(Transactions.TRANSACTIONS.ID))
+                .join(Accounts.ACCOUNTS).on(Accounts.ACCOUNTS.ID.eq(Entries.ENTRIES.ACCOUNT_ID))
+                .where(Accounts.ACCOUNTS.USER_ID.eq(userId))
                 .orderBy(Transactions.TRANSACTIONS.CREATED_AT.desc())
                 .limit(size)
                 .offset((long) page * size)
-                .fetch(r -> new TransactionResponse(
-                        r.get(Transactions.TRANSACTIONS.ID),
-                        r.get(Transactions.TRANSACTIONS.REFERENCE),
-                        r.get(Transactions.TRANSACTIONS.TYPE),
-                        r.get(Transactions.TRANSACTIONS.STATUS),
-                        r.get(Transactions.TRANSACTIONS.DESCRIPTION),
-                        r.get(Transactions.TRANSACTIONS.CREATED_AT)));
+                .fetch(r -> {
+                    Long entryAmount = r.get(Entries.ENTRIES.AMOUNT);
+                    long amount = entryAmount != null ? Math.abs(entryAmount) : 0L;
+                    String direction = entryAmount != null && entryAmount < 0 ? "DEBIT" : "CREDIT";
+                    return new TransactionResponse(
+                            r.get(Transactions.TRANSACTIONS.ID),
+                            r.get(Transactions.TRANSACTIONS.REFERENCE),
+                            r.get(Transactions.TRANSACTIONS.TYPE),
+                            r.get(Transactions.TRANSACTIONS.STATUS),
+                            r.get(Transactions.TRANSACTIONS.DESCRIPTION),
+                            r.get(Transactions.TRANSACTIONS.CREATED_AT),
+                            amount,
+                            r.get(Accounts.ACCOUNTS.CURRENCY),
+                            direction);
+                });
 
         return PagedResponse.of(items, page, size, total);
+    }
+
+    private UUID requireUserId(HttpServletRequest httpRequest) {
+        Object userId = httpRequest.getAttribute("userId");
+        if (userId instanceof UUID uuid) {
+            return uuid;
+        }
+        throw new UnauthorizedException("Authentication required");
     }
 }

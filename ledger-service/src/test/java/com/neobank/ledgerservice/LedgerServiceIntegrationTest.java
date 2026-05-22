@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -48,6 +49,13 @@ class LedgerServiceIntegrationTest {
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
         doNothing().when(kycGateway).requireKycApproved(any());
+    }
+
+    private RequestPostProcessor authenticatedAs(UUID userId) {
+        return request -> {
+            request.setAttribute("userId", userId);
+            return request;
+        };
     }
 
     private UUID createAccount(UUID userId) throws Exception {
@@ -167,8 +175,26 @@ class LedgerServiceIntegrationTest {
     }
 
     @Test
-    void getTransactions_returnsOk() throws Exception {
-        mockMvc.perform(get("/api/v1/transactions"))
+    void getTransactions_returnsAmountCurrencyAndDirection() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID senderAccount = createAccount(userId);
+        UUID receiverAccount = createAccount(UUID.randomUUID());
+        fundAccount(senderAccount, 5_000L);
+
+        TransferRequest request = new TransferRequest(
+                senderAccount, receiverAccount, 1_000L, "USD", "History transfer");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/transactions")
+                        .with(authenticatedAs(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[0].amount").value(1000))
+                .andExpect(jsonPath("$.items[0].currency").value("USD"))
+                .andExpect(jsonPath("$.items[0].direction").value("DEBIT"));
     }
 }
