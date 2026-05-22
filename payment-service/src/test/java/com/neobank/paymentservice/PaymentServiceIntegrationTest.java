@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
@@ -47,13 +48,25 @@ class PaymentServiceIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
     }
 
+    private RequestPostProcessor authenticatedAs(UUID userId) {
+        return request -> {
+            request.setAttribute("userId", userId);
+            return request;
+        };
+    }
+
+    private UUID responseUuid(MvcResult result, String fieldName) throws Exception {
+        return UUID.fromString(
+                objectMapper.readTree(result.getResponse().getContentAsString()).get(fieldName).asText());
+    }
+
     @Test
     void processPayment_success() throws Exception {
-        // null idempotencyKey — each call generates a fresh order
         PaymentRequest request = new PaymentRequest(
                 UUID.randomUUID(), UUID.randomUUID(), 5000L, "USD", "Test payment", null);
 
         mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(request.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -62,21 +75,33 @@ class PaymentServiceIntegrationTest {
     }
 
     @Test
+    void processPayment_onBehalfOfAnotherUser_returnsForbidden() throws Exception {
+        PaymentRequest request = new PaymentRequest(
+                UUID.randomUUID(), UUID.randomUUID(), 5000L, "USD", "Test payment", null);
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void processPayment_idempotent_returnsSameOrderId() throws Exception {
-        // Two submissions with the same idempotencyKey must return the same orderId.
-        // The second request is short-circuited by the Redis cache (or falls through
-        // to DB processing if Redis is unavailable, which is the safe fail-open path).
         String idempotencyKey = "test-idem-" + UUID.randomUUID();
         PaymentRequest idemRequest = new PaymentRequest(
                 UUID.randomUUID(), UUID.randomUUID(), 1000L, "USD", "Idempotent payment", idempotencyKey);
 
         MvcResult first = mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(idemRequest.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(idemRequest)))
                 .andExpect(status().isOk())
                 .andReturn();
 
         MvcResult second = mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(idemRequest.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(idemRequest)))
                 .andExpect(status().isOk())
@@ -87,40 +112,32 @@ class PaymentServiceIntegrationTest {
         String secondOrderId = objectMapper.readTree(second.getResponse().getContentAsString())
                 .get("orderId").asText();
 
-        // If Redis is up both calls return the same orderId (idempotent).
-        // If Redis is down both calls hit the DB; the order IDs will differ but both succeed.
-        // Either outcome is acceptable in this test — we assert the response shape is valid.
         assertThat(firstOrderId).isNotBlank();
         assertThat(secondOrderId).isNotBlank();
     }
 
     @Test
     void outboxPoller_processesEvent_marksProcessed() throws Exception {
-        // 1. Submit a payment — creates a PENDING outbox entry
         PaymentRequest request = new PaymentRequest(
                 UUID.randomUUID(), UUID.randomUUID(), 1000L, "USD", "Outbox test", null);
 
         MvcResult result = mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(request.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andReturn();
 
-        UUID orderId = UUID.fromString(
-                objectMapper.readTree(result.getResponse().getContentAsString())
-                        .get("orderId").asText());
+        UUID orderId = responseUuid(result, "orderId");
 
-        // 2. Verify the outbox entry is PENDING before polling
         String statusBefore = dsl.select(PaymentOutbox.PAYMENT_OUTBOX.STATUS)
                 .from(PaymentOutbox.PAYMENT_OUTBOX)
                 .where(PaymentOutbox.PAYMENT_OUTBOX.AGGREGATE_ID.eq(orderId))
                 .fetchOne(PaymentOutbox.PAYMENT_OUTBOX.STATUS);
         assertThat(statusBefore).isEqualTo(OutboxPoller.STATUS_PENDING);
 
-        // 3. Manually trigger the poller (no need to wait for @Scheduled)
         outboxPoller.poll();
 
-        // 4. Assert status=PROCESSED, processed_at and last_attempted_at are set
         var row = dsl.selectFrom(PaymentOutbox.PAYMENT_OUTBOX)
                 .where(PaymentOutbox.PAYMENT_OUTBOX.AGGREGATE_ID.eq(orderId))
                 .fetchOne();
@@ -133,21 +150,18 @@ class PaymentServiceIntegrationTest {
 
     @Test
     void outboxPoller_backoff_setsNextRetryAtOnFailure() throws Exception {
-        // Submit a payment to get a PENDING outbox row
         PaymentRequest request = new PaymentRequest(
                 UUID.randomUUID(), UUID.randomUUID(), 2000L, "USD", "Back-off test", null);
 
         MvcResult result = mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(request.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andReturn();
 
-        UUID orderId = UUID.fromString(
-                objectMapper.readTree(result.getResponse().getContentAsString())
-                        .get("orderId").asText());
+        UUID orderId = responseUuid(result, "orderId");
 
-        // Simulate a failure path via direct update: set back-off window
         dsl.update(PaymentOutbox.PAYMENT_OUTBOX)
                 .set(PaymentOutbox.PAYMENT_OUTBOX.RETRY_COUNT, 1)
                 .set(PaymentOutbox.PAYMENT_OUTBOX.LAST_ATTEMPTED_AT, OffsetDateTime.now().minusSeconds(60))
@@ -155,12 +169,10 @@ class PaymentServiceIntegrationTest {
                 .where(PaymentOutbox.PAYMENT_OUTBOX.AGGREGATE_ID.eq(orderId))
                 .execute();
 
-        // Event is in back-off window — poller must NOT pick it up
         List<com.neobank.paymentservice.jooq.tables.records.PaymentOutboxRecord> batch =
                 outboxPoller.fetchPendingBatch();
         assertThat(batch).noneMatch(e -> e.getAggregateId().equals(orderId));
 
-        // Clear the back-off window — poller should now pick it up
         dsl.update(PaymentOutbox.PAYMENT_OUTBOX)
                 .set(PaymentOutbox.PAYMENT_OUTBOX.NEXT_RETRY_AT, OffsetDateTime.now().minusSeconds(1))
                 .where(PaymentOutbox.PAYMENT_OUTBOX.AGGREGATE_ID.eq(orderId))
@@ -172,23 +184,22 @@ class PaymentServiceIntegrationTest {
 
     @Test
     void outboxPoller_idempotent_alreadyProcessed() throws Exception {
-        // Submit payment and process it once
         PaymentRequest request = new PaymentRequest(
                 UUID.randomUUID(), UUID.randomUUID(), 500L, "USD", "Idempotency test", null);
 
         mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(request.senderId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk());
 
-        outboxPoller.poll(); // first poll — processes the event
+        outboxPoller.poll();
 
-        // Count PROCESSED rows before second poll
         int countBefore = dsl.fetchCount(
                 dsl.selectFrom(PaymentOutbox.PAYMENT_OUTBOX)
                         .where(PaymentOutbox.PAYMENT_OUTBOX.STATUS.eq(OutboxPoller.STATUS_PROCESSED)));
 
-        outboxPoller.poll(); // second poll — nothing PENDING left, count unchanged
+        outboxPoller.poll();
 
         int countAfter = dsl.fetchCount(
                 dsl.selectFrom(PaymentOutbox.PAYMENT_OUTBOX)
@@ -198,8 +209,33 @@ class PaymentServiceIntegrationTest {
     }
 
     @Test
-    void getPayments_returnsOk() throws Exception {
-        mockMvc.perform(get("/api/v1/payments"))
-                .andExpect(status().isOk());
+    void getPayments_returnsOnlyAuthenticatedUsersPayments() throws Exception {
+        PaymentRequest visibleRequest = new PaymentRequest(
+                UUID.randomUUID(), UUID.randomUUID(), 700L, "USD", "Visible payment", null);
+        PaymentRequest hiddenRequest = new PaymentRequest(
+                UUID.randomUUID(), UUID.randomUUID(), 900L, "USD", "Hidden payment", null);
+
+        UUID visibleOrderId = responseUuid(mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(visibleRequest.senderId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(visibleRequest)))
+                .andExpect(status().isOk())
+                .andReturn(), "orderId");
+
+        UUID hiddenOrderId = responseUuid(mockMvc.perform(post("/api/v1/payments")
+                        .with(authenticatedAs(hiddenRequest.senderId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(hiddenRequest)))
+                .andExpect(status().isOk())
+                .andReturn(), "orderId");
+
+        MvcResult result = mockMvc.perform(get("/api/v1/payments")
+                        .with(authenticatedAs(visibleRequest.senderId())))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        assertThat(responseBody).contains(visibleOrderId.toString());
+        assertThat(responseBody).doesNotContain(hiddenOrderId.toString());
     }
 }
