@@ -3,6 +3,8 @@ package com.neobank.ledgerservice.gateway;
 import com.neobank.common.exception.ForbiddenException;
 import com.neobank.common.exception.ServiceUnavailableException;
 import com.neobank.ledgerservice.model.KycStatus;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,6 +59,8 @@ public class KycGateway {
      * Throws {@link ServiceUnavailableException} on connectivity failure — transfers are
      * rejected when KYC status cannot be confirmed (fail-closed for compliance).
      */
+    @CircuitBreaker(name = "kycGateway", fallbackMethod = "requireKycApprovedFallback")
+    @Bulkhead(name = "kycGateway")
     public void requireKycApproved(UUID userId) {
         try {
             var request = restClient.get()
@@ -79,6 +83,15 @@ public class KycGateway {
             log.error("KYC service unavailable for user {} — failing closed: {}", userId, ex.getMessage());
             throw new ServiceUnavailableException("KYC service unavailable; transfer not permitted");
         }
+    }
+
+    private void requireKycApprovedFallback(UUID userId, ForbiddenException ex) {
+        throw ex;
+    }
+
+    private void requireKycApprovedFallback(UUID userId, Exception ex) {
+        log.warn("KYC gateway circuit open for user {} — denying transfer: {}", userId, ex.getMessage());
+        throw new ForbiddenException("KYC service unavailable — transfer denied");
     }
 
     /** Wire DTO — uses a raw String so unknown future status values map to {@link KycStatus#UNKNOWN}. */
