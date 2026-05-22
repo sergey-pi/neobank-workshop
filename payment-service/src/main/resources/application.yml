@@ -11,6 +11,11 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/neobank_payment_db
     user: ${DB_USER:neouser}
     password: ${DB_PASSWORD:neopassword}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 1000
 
 server:
   port: 8083
