@@ -1,10 +1,14 @@
 package com.neobank.userservice.service;
 
 import com.neobank.common.exception.ConflictException;
+import com.neobank.common.exception.ForbiddenException;
 import com.neobank.common.exception.NotFoundException;
+import com.neobank.common.exception.UnauthorizedException;
 import com.neobank.userservice.model.KycStatus;
 import com.neobank.userservice.cache.KycStatusCache;
 import com.neobank.userservice.dto.KycStatusResponse;
+import com.neobank.userservice.dto.LoginRequest;
+import com.neobank.userservice.dto.LoginResponse;
 import com.neobank.userservice.dto.UserRegistrationRequest;
 import com.neobank.userservice.dto.UserResponse;
 import com.neobank.userservice.jooq.tables.UserAddresses;
@@ -39,11 +43,17 @@ public class UserService {
     private final DSLContext dsl;
     private final PasswordEncoder passwordEncoder;
     private final KycStatusCache kycStatusCache;
+    private final JwtUtil jwtUtil;
 
-    public UserService(DSLContext dsl, PasswordEncoder passwordEncoder, KycStatusCache kycStatusCache) {
+    public UserService(
+            DSLContext dsl,
+            PasswordEncoder passwordEncoder,
+            KycStatusCache kycStatusCache,
+            JwtUtil jwtUtil) {
         this.dsl = dsl;
         this.passwordEncoder = passwordEncoder;
         this.kycStatusCache = kycStatusCache;
+        this.jwtUtil = jwtUtil;
     }
 
     /**
@@ -107,6 +117,37 @@ public class UserService {
                 .execute();
 
         return new UserResponse(userId, request.email(), request.firstName(), request.lastName(), "ACTIVE");
+    }
+
+    @Transactional(readOnly = true)
+    public LoginResponse login(LoginRequest request) {
+        var userRecord = dsl.select(
+                        Users.USERS.ID,
+                        Users.USERS.EMAIL,
+                        Users.USERS.PASSWORD_HASH,
+                        Users.USERS.STATUS)
+                .from(Users.USERS)
+                .where(Users.USERS.EMAIL.eq(request.email()))
+                .fetchOne();
+
+        if (userRecord == null) {
+            throw new UnauthorizedException("Invalid email or password");
+        }
+
+        String storedHash = userRecord.get(Users.USERS.PASSWORD_HASH);
+        if (!passwordEncoder.matches(request.password(), storedHash)) {
+            throw new UnauthorizedException("Invalid email or password");
+        }
+
+        String status = userRecord.get(Users.USERS.STATUS);
+        if ("SUSPENDED".equals(status)) {
+            throw new ForbiddenException("User account is suspended");
+        }
+
+        UUID userId = userRecord.get(Users.USERS.ID);
+        String email = userRecord.get(Users.USERS.EMAIL);
+        String token = jwtUtil.generateToken(userId, email);
+        return new LoginResponse(token, userId, email, jwtUtil.getExpirationSeconds());
     }
 
     /**

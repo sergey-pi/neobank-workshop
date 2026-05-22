@@ -38,6 +38,11 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage());
     }
 
+    @ExceptionHandler(UnauthorizedException.class)
+    public ProblemDetail handleUnauthorized(UnauthorizedException ex) {
+        return problem(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", ex.getMessage());
+    }
+
     @ExceptionHandler(ServiceUnavailableException.class)
     public ProblemDetail handleServiceUnavailable(ServiceUnavailableException ex) {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", ex.getMessage());

@@ -1,5 +1,6 @@
 package com.neobank.userservice;
 
+import com.neobank.userservice.dto.LoginRequest;
 import com.neobank.userservice.dto.UserRegistrationRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,10 @@ class UserServiceIntegrationTest {
         );
     }
 
+    private LoginRequest buildLoginRequest(String email, String password) {
+        return new LoginRequest(email, password);
+    }
+
     @Test
     void registerUser_success() throws Exception {
         String email = "alice+" + UUID.randomUUID() + "@example.com";
@@ -79,6 +84,52 @@ class UserServiceIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CONFLICT"))
                 .andExpect(jsonPath("$.detail").isNotEmpty());
+    }
+
+    @Test
+    void login_success_returnsJwt() throws Exception {
+        String email = "login+" + UUID.randomUUID() + "@example.com";
+
+        MvcResult registrationResult = mockMvc.perform(post("/api/v1/users/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildRequest(email))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String userId = objectMapper.readTree(registrationResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildLoginRequest(email, "password123"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.userId").value(userId))
+                .andExpect(jsonPath("$.email").value(email))
+                .andExpect(jsonPath("$.expiresIn").value(3600));
+    }
+
+    @Test
+    void login_wrongPassword_returns401() throws Exception {
+        String email = "bad-password+" + UUID.randomUUID() + "@example.com";
+
+        mockMvc.perform(post("/api/v1/users/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildRequest(email))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildLoginRequest(email, "wrong-password"))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void login_wrongEmail_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                buildLoginRequest("missing+" + UUID.randomUUID() + "@example.com", "password123"))))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
