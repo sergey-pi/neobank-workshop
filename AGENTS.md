@@ -80,7 +80,7 @@ All Redis operations wrap in try-catch and **fail open** — Redis unavailabilit
 
 ### Rate limiting (user-service)
 - `RateLimiterFilter` intercepts `POST /api/v1/users/register`
-- Sliding window, keyed by client IP, in-memory `ConcurrentHashMap`
+- Sliding window, keyed by client IP, Caffeine cache (bounded 100k entries, 2-min expiry)
 - Returns `429 Too Many Requests` + `Retry-After: 60` header
 - Configurable via `security.rate-limit.requests-per-minute` (default 10)
 
