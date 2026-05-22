@@ -1,6 +1,7 @@
 package com.neobank.ledgerservice.gateway;
 
 import com.neobank.common.exception.ForbiddenException;
+import com.neobank.common.exception.ServiceUnavailableException;
 import com.neobank.common.model.KycStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,10 +31,15 @@ public class KycGateway {
     private static final Logger log = LoggerFactory.getLogger(KycGateway.class);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
+    private static final String SERVICE_KEY_HEADER = "X-Service-Key";
 
     private final RestClient restClient;
+    private final String internalServiceKey;
 
-    public KycGateway(@Value("${services.user-service.base-url}") String userServiceBaseUrl) {
+    public KycGateway(
+            @Value("${services.user-service.base-url}") String userServiceBaseUrl,
+            @Value("${services.internal-service-key:}") String internalServiceKey) {
+        this.internalServiceKey = internalServiceKey;
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
@@ -48,15 +54,19 @@ public class KycGateway {
 
     /**
      * Throws {@link ForbiddenException} if the user is not KYC-approved.
-     * On connectivity failure, fails open (logs warning, allows transfer) to avoid a
-     * hard dependency on user-service availability in the MVP.
+     * Throws {@link ServiceUnavailableException} on connectivity failure — transfers are
+     * rejected when KYC status cannot be confirmed (fail-closed for compliance).
      */
     public void requireKycApproved(UUID userId) {
         try {
-            KycStatusResponse response = restClient.get()
-                    .uri("/api/v1/users/{userId}/kyc-status", userId)
-                    .retrieve()
-                    .body(KycStatusResponse.class);
+            var request = restClient.get()
+                    .uri("/api/v1/users/{userId}/kyc-status", userId);
+
+            if (!internalServiceKey.isEmpty()) {
+                request = request.header(SERVICE_KEY_HEADER, internalServiceKey);
+            }
+
+            KycStatusResponse response = request.retrieve().body(KycStatusResponse.class);
 
             if (response == null || response.kycStatus() != KycStatus.APPROVED) {
                 KycStatus status = response == null ? null : response.kycStatus();
@@ -66,7 +76,8 @@ public class KycGateway {
         } catch (ForbiddenException ex) {
             throw ex;
         } catch (RestClientException ex) {
-            log.warn("KYC check failed for user {} — failing open: {}", userId, ex.getMessage());
+            log.error("KYC service unavailable for user {} — failing closed: {}", userId, ex.getMessage());
+            throw new ServiceUnavailableException("KYC service unavailable; transfer not permitted");
         }
     }
 

@@ -33,7 +33,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * singleton and persists for the lifetime of the application context).</p>
  */
 @SpringBootTest
-@TestPropertySource(properties = "security.rate-limit.requests-per-minute=3")
+@TestPropertySource(properties = {
+    "security.rate-limit.requests-per-minute=3",
+    "security.rate-limit.trusted-proxy-cidrs=127.0.0.1/32,::1/128"
+})
 class RateLimiterFilterIntegrationTest {
 
     @Autowired

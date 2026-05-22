@@ -11,6 +11,8 @@ import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
 import com.neobank.ledgerservice.jooq.tables.records.BalancesRecord;
 import org.jooq.DSLContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,6 +55,8 @@ import java.util.UUID;
 @Service
 public class LedgerService {
 
+    private static final Logger log = LoggerFactory.getLogger(LedgerService.class);
+
     private final DSLContext dsl;
     private final KycGateway kycGateway;
     private final SpendCounterCache spendCounterCache;
@@ -83,9 +87,9 @@ public class LedgerService {
     public TransferResponse transfer(TransferRequest request) {
         // 1. Per-transaction limit check — fast fail before any I/O.
         if (request.amount() > maxTransferAmount) {
-            throw new UnprocessableException(
-                    "Transfer amount " + request.amount()
-                    + " exceeds per-transaction limit of " + maxTransferAmount);
+            log.warn("Transfer rejected: amount {} exceeds per-transaction limit {} for account {}",
+                    request.amount(), maxTransferAmount, request.fromAccountId());
+            throw new UnprocessableException("Transfer amount exceeds the per-transaction limit");
         }
 
         // 2. Resolve userId — needed to identify the KYC subject.
@@ -103,13 +107,15 @@ public class LedgerService {
         //    opens so a slow KYC service does not hold a DB connection/lock.
         kycGateway.requireKycApproved(fromUserId);
 
-        // 4. Daily spend fast-path via Redis (key: spend:{accountId}:{date}, TTL 25 h).
-        //    Returns -1 when Redis is unavailable; SQL fallback inside the tx covers that case.
+        // 4. Daily spend early fast-fail via Redis (key: spend:{accountId}:{date}, TTL 25 h).
+        //    This is an optimisation only — NOT the authoritative check.
+        //    The authoritative serialised check is step 8 inside the transaction.
+        //    Returns -1 when Redis is unavailable; the tx-level SQL check always runs regardless.
         long redisSpent = spendCounterCache.get(request.fromAccountId());
         if (redisSpent >= 0 && redisSpent + request.amount() > dailySpendLimit) {
-            throw new UnprocessableException(
-                    "Transfer would exceed daily spend limit of " + dailySpendLimit
-                    + " (already spent: " + redisSpent + ")");
+            log.warn("Transfer fast-rejected by Redis counter: spent {} + amount {} > limit {} for account {}",
+                    redisSpent, request.amount(), dailySpendLimit, request.fromAccountId());
+            throw new UnprocessableException("daily spend limit exceeded");
         }
 
         // Steps 5–13: all DB writes are atomic inside one transaction.
@@ -163,8 +169,11 @@ public class LedgerService {
                             + " does not match account currency " + fromBalance.getCurrency());
         }
 
-        // 8. SQL daily spend fallback — runs when Redis was unavailable (step 4 skipped fast-path).
-        //    Inside the transaction so the SUM is consistent with the lock acquired in step 5.
+        // 8. Authoritative daily spend check — ALWAYS runs inside the transaction, serialised
+        //    by the SELECT FOR UPDATE lock acquired in step 5. This prevents the TOCTOU race
+        //    where two concurrent transfers from the same account both pass the Redis fast-fail
+        //    before either commits. After step 5's lock is released by the prior holder, this
+        //    re-reads committed entries and correctly sees the updated spend total.
         OffsetDateTime startOfDay = LocalDate.now(ZoneOffset.UTC)
                 .atStartOfDay().atOffset(ZoneOffset.UTC);
         Long todaySpend = dsl.select(org.jooq.impl.DSL.sum(Entries.ENTRIES.AMOUNT).neg())
@@ -176,7 +185,9 @@ public class LedgerService {
 
         long spent = todaySpend == null ? 0L : todaySpend;
         if (spent + request.amount() > dailySpendLimit) {
-            throw new UnprocessableException("Daily spend limit exceeded");
+            log.warn("Transfer rejected by authoritative SQL check: spent {} + amount {} > limit {} for account {}",
+                    spent, request.amount(), dailySpendLimit, request.fromAccountId());
+            throw new UnprocessableException("daily spend limit exceeded");
         }
 
         // 9. Sufficient funds check — lock held since step 5.

@@ -30,6 +30,7 @@ neobank:
 services:
   user-service:
     base-url: ${USER_SERVICE_URL:http://localhost:8081}
+  internal-service-key: ${INTERNAL_SERVICE_KEY:}
 
 security:
   limits:

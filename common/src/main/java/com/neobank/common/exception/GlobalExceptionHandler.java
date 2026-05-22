@@ -38,6 +38,11 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage());
     }
 
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ProblemDetail handleServiceUnavailable(ServiceUnavailableException ex) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", ex.getMessage());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
         return problem(HttpStatus.BAD_REQUEST, "BAD_REQUEST", ex.getMessage());
