@@ -30,3 +30,13 @@ neobank:
 security:
   rate-limit:
     requests-per-minute: ${RATE_LIMIT_RPM:10}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  info:
+    title: NeoBank User Service API
+    description: Identity, registration, and KYC management
+    version: 1.0.0

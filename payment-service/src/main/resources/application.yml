@@ -31,3 +31,13 @@ outbox:
   poll:
     interval-ms: ${OUTBOX_POLL_INTERVAL_MS:5000}
     max-retries: ${OUTBOX_MAX_RETRIES:3}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  info:
+    title: NeoBank Payment Service API
+    description: Payment orders, routing, and idempotency
+    version: 1.0.0
