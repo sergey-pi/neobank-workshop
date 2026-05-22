@@ -35,3 +35,13 @@ security:
   limits:
     max-transfer-amount: ${MAX_TRANSFER_AMOUNT:1000000}
     daily-spend-limit: ${DAILY_SPEND_LIMIT:5000000}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  info:
+    title: NeoBank Ledger Service API
+    description: Double-entry accounting and balance management
+    version: 1.0.0
