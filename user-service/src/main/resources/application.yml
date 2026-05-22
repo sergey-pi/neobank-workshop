@@ -30,6 +30,10 @@ neobank:
 security:
   rate-limit:
     requests-per-minute: ${RATE_LIMIT_RPM:10}
+    # Comma-separated CIDR list of trusted reverse proxies allowed to set X-Forwarded-For.
+    # Empty (default) means X-Forwarded-For is never trusted (prevents IP spoofing bypasses).
+    trusted-proxy-cidrs: ${TRUSTED_PROXY_CIDRS:}
+  internal-service-key: ${INTERNAL_SERVICE_KEY:}
 
 springdoc:
   api-docs:
