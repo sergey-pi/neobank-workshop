@@ -1,6 +1,8 @@
 package com.neobank.userservice.controller;
 
 import com.neobank.userservice.dto.KycStatusResponse;
+import com.neobank.userservice.dto.LoginRequest;
+import com.neobank.userservice.dto.LoginResponse;
 import com.neobank.userservice.dto.UserRegistrationRequest;
 import com.neobank.userservice.dto.UserResponse;
 import com.neobank.userservice.jooq.tables.Users;
@@ -33,6 +35,11 @@ public class UserController {
     @PostMapping("/register")
     public UserResponse registerUser(@Valid @RequestBody UserRegistrationRequest request) {
         return userService.register(request);
+    }
+
+    @PostMapping("/login")
+    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
+        return userService.login(request);
     }
 
     @GetMapping
