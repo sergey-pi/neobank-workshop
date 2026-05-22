@@ -1,5 +1,6 @@
 package com.neobank.paymentservice.controller;
 
+import com.neobank.paymentservice.dto.PaymentOrderResponse;
 import com.neobank.paymentservice.dto.PaymentRequest;
 import com.neobank.paymentservice.dto.PaymentResponse;
 import com.neobank.paymentservice.jooq.tables.PaymentOrders;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/payments")
@@ -33,8 +33,17 @@ public class PaymentController {
     }
 
     @GetMapping
-    public List<Map<String, Object>> getPayments() {
+    public List<PaymentOrderResponse> getPayments() {
         return dsl.selectFrom(PaymentOrders.PAYMENT_ORDERS)
-                .fetchMaps();
+                .orderBy(PaymentOrders.PAYMENT_ORDERS.CREATED_AT.desc())
+                .fetch(r -> new PaymentOrderResponse(
+                        r.get(PaymentOrders.PAYMENT_ORDERS.ID),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.USER_ID),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.TYPE),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.STATUS),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.AMOUNT),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.CURRENCY),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.EXTERNAL_REFERENCE),
+                        r.get(PaymentOrders.PAYMENT_ORDERS.CREATED_AT)));
     }
 }
