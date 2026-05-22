@@ -1,7 +1,8 @@
 -- Add idempotency key support to transfers.
--- A unique constraint ensures duplicate requests with the same key cannot insert
--- twice even under concurrent load (INSERT ON CONFLICT DO NOTHING guard).
+-- A standard UNIQUE constraint (not a partial index) is required for
+-- ON CONFLICT (idempotency_key) DO NOTHING to work correctly.
+-- PostgreSQL allows multiple NULLs in a UNIQUE column (NULLs are never equal),
+-- so transfers without an idempotency key are unaffected.
 ALTER TABLE transactions ADD COLUMN idempotency_key VARCHAR(255);
-CREATE UNIQUE INDEX idx_transactions_idempotency_key
-    ON transactions (idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
+ALTER TABLE transactions
+    ADD CONSTRAINT uq_transactions_idempotency_key UNIQUE (idempotency_key);

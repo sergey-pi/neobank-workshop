@@ -33,7 +33,7 @@ public class TransferIdempotencyCache {
         try {
             return Optional.ofNullable(redis.opsForValue().get(KEY_PREFIX + idempotencyKey));
         } catch (Exception ex) {
-            log.warn("Redis GET transfer-idem:{} failed — cache miss: {}", idempotencyKey, ex.getMessage());
+            log.warn("Redis GET transfer-idem:{} failed — cache miss: {}", sanitize(idempotencyKey), ex.getMessage());
             return Optional.empty();
         }
     }
@@ -43,7 +43,12 @@ public class TransferIdempotencyCache {
         try {
             redis.opsForValue().setIfAbsent(KEY_PREFIX + idempotencyKey, transactionId, TTL);
         } catch (Exception ex) {
-            log.warn("Redis SET transfer-idem:{} failed: {}", idempotencyKey, ex.getMessage());
+            log.warn("Redis SET transfer-idem:{} failed: {}", sanitize(idempotencyKey), ex.getMessage());
         }
+    }
+
+    /** Strips newline/carriage-return characters to prevent log injection. */
+    private static String sanitize(String value) {
+        return value == null ? null : value.replaceAll("[\r\n]", "_");
     }
 }

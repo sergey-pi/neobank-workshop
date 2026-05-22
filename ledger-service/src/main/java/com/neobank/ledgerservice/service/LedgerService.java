@@ -105,7 +105,7 @@ public class LedgerService {
         if (idempotencyKey != null) {
             Optional<String> cached = idempotencyCache.get(idempotencyKey);
             if (cached.isPresent()) {
-                log.debug("Idempotency cache hit for key={}", idempotencyKey);
+                log.debug("Idempotency cache hit for key={}", idempotencyKey.replaceAll("[\r\n]", "_"));
                 return new TransferResponse(UUID.fromString(cached.get()), "COMPLETED",
                         "Transfer already processed");
             }
