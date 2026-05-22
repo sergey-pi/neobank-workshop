@@ -16,6 +16,10 @@ Full details: [`.github/copilot-instructions.md`](.github/copilot-instructions.m
 ## Essential Commands
 
 ```bash
+# 0. One-time setup after cloning — activate pre-commit quality gate
+git config core.hooksPath .githooks
+# To bypass in emergencies: git commit --no-verify
+
 # 1. Start PostgreSQL and Redis (native local services)
 brew services start postgresql@16
 brew services start redis

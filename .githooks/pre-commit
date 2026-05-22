@@ -1,0 +1,27 @@
+#!/bin/sh
+# NeoBank pre-commit hook: runs Checkstyle and SpotBugs on all modules.
+# Install once after cloning: git config core.hooksPath .githooks
+#
+# Bypass (emergencies only): git commit --no-verify
+
+set -e
+
+echo "🔍 Running Checkstyle..."
+./mvnw checkstyle:check \
+  -pl common,user-service,ledger-service,payment-service \
+  --no-transfer-progress -q
+if [ $? -ne 0 ]; then
+  echo "❌ Checkstyle failed. Fix violations before committing."
+  exit 1
+fi
+
+echo "🔍 Running SpotBugs..."
+./mvnw spotbugs:check \
+  -pl common,user-service,ledger-service,payment-service \
+  --no-transfer-progress -q
+if [ $? -ne 0 ]; then
+  echo "❌ SpotBugs failed. Fix issues before committing."
+  exit 1
+fi
+
+echo "✅ Pre-commit checks passed."
