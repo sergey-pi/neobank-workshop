@@ -1,6 +1,6 @@
 package com.neobank.userservice.dto;
 
-import com.neobank.common.model.KycStatus;
+import com.neobank.userservice.model.KycStatus;
 
 import java.util.UUID;
 

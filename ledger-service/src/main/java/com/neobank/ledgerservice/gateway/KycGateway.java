@@ -2,7 +2,7 @@ package com.neobank.ledgerservice.gateway;
 
 import com.neobank.common.exception.ForbiddenException;
 import com.neobank.common.exception.ServiceUnavailableException;
-import com.neobank.common.model.KycStatus;
+import com.neobank.ledgerservice.model.KycStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,8 +68,8 @@ public class KycGateway {
 
             KycStatusResponse response = request.retrieve().body(KycStatusResponse.class);
 
-            if (response == null || response.kycStatus() != KycStatus.APPROVED) {
-                KycStatus status = response == null ? null : response.kycStatus();
+            KycStatus status = response == null ? KycStatus.UNKNOWN : response.parsedStatus();
+            if (status != KycStatus.APPROVED) {
                 throw new ForbiddenException(
                         "Transfer denied: KYC not approved for user " + userId + " (status: " + status + ")");
             }
@@ -81,6 +81,10 @@ public class KycGateway {
         }
     }
 
-    private record KycStatusResponse(UUID userId, KycStatus kycStatus) {
+    /** Wire DTO — uses a raw String so unknown future status values map to {@link KycStatus#UNKNOWN}. */
+    private record KycStatusResponse(UUID userId, String kycStatus) {
+        KycStatus parsedStatus() {
+            return KycStatus.fromWire(kycStatus);
+        }
     }
 }

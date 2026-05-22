@@ -2,7 +2,7 @@ package com.neobank.userservice.service;
 
 import com.neobank.common.exception.ConflictException;
 import com.neobank.common.exception.NotFoundException;
-import com.neobank.common.model.KycStatus;
+import com.neobank.userservice.model.KycStatus;
 import com.neobank.userservice.cache.KycStatusCache;
 import com.neobank.userservice.dto.KycStatusResponse;
 import com.neobank.userservice.dto.UserRegistrationRequest;
