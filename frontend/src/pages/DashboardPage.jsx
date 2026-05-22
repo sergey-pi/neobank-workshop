@@ -130,7 +130,7 @@ export default function DashboardPage() {
           {accounts.map((a) => (
             <div key={a.id} className="account-item">
               <div className="text-muted">{a.name ?? a.type}</div>
-              <div className="account-amount">{formatAmount(a.available_amount ?? a.availableAmount ?? 0)} {a.currency}</div>
+              <div className="account-amount">{formatAmount(a.availableAmount ?? 0)} {a.currency}</div>
               <div className="account-meta">{a.status} · {String(a.id).slice(0, 8)}…</div>
             </div>
           ))}

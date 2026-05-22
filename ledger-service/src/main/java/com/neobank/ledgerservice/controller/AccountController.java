@@ -3,6 +3,7 @@ package com.neobank.ledgerservice.controller;
 import com.neobank.ledgerservice.dto.AccountResponse;
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
 import com.neobank.ledgerservice.jooq.tables.Accounts;
+import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.service.AccountService;
 import jakarta.validation.Valid;
 import org.jooq.DSLContext;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/accounts")
@@ -33,8 +33,25 @@ public class AccountController {
     }
 
     @GetMapping
-    public List<Map<String, Object>> getAccounts() {
-        return dsl.selectFrom(Accounts.ACCOUNTS)
-                .fetchMaps();
+    public List<AccountResponse> getAccounts() {
+        return dsl.select(
+                        Accounts.ACCOUNTS.ID,
+                        Accounts.ACCOUNTS.USER_ID,
+                        Accounts.ACCOUNTS.CURRENCY,
+                        Accounts.ACCOUNTS.NAME,
+                        Accounts.ACCOUNTS.TYPE,
+                        Accounts.ACCOUNTS.STATUS,
+                        Balances.BALANCES.AVAILABLE_AMOUNT)
+                .from(Accounts.ACCOUNTS)
+                .leftJoin(Balances.BALANCES).on(Balances.BALANCES.ACCOUNT_ID.eq(Accounts.ACCOUNTS.ID))
+                .fetch(r -> new AccountResponse(
+                        r.get(Accounts.ACCOUNTS.ID),
+                        r.get(Accounts.ACCOUNTS.USER_ID),
+                        r.get(Accounts.ACCOUNTS.CURRENCY),
+                        r.get(Accounts.ACCOUNTS.NAME),
+                        r.get(Accounts.ACCOUNTS.TYPE),
+                        r.get(Accounts.ACCOUNTS.STATUS),
+                        r.get(Balances.BALANCES.AVAILABLE_AMOUNT) != null
+                                ? r.get(Balances.BALANCES.AVAILABLE_AMOUNT) : 0L));
     }
 }

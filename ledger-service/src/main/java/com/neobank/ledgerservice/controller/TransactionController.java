@@ -1,5 +1,6 @@
 package com.neobank.ledgerservice.controller;
 
+import com.neobank.ledgerservice.dto.TransactionResponse;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.dto.TransferResponse;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/transactions")
@@ -33,8 +33,15 @@ public class TransactionController {
     }
 
     @GetMapping
-    public List<Map<String, Object>> getTransactions() {
+    public List<TransactionResponse> getTransactions() {
         return dsl.selectFrom(Transactions.TRANSACTIONS)
-                .fetchMaps();
+                .orderBy(Transactions.TRANSACTIONS.CREATED_AT.desc())
+                .fetch(r -> new TransactionResponse(
+                        r.get(Transactions.TRANSACTIONS.ID),
+                        r.get(Transactions.TRANSACTIONS.REFERENCE),
+                        r.get(Transactions.TRANSACTIONS.TYPE),
+                        r.get(Transactions.TRANSACTIONS.STATUS),
+                        r.get(Transactions.TRANSACTIONS.DESCRIPTION),
+                        r.get(Transactions.TRANSACTIONS.CREATED_AT)));
     }
 }

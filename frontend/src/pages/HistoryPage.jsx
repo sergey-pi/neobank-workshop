@@ -1,10 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getTransactions } from '../api/ledgerApi.js';
 
-function formatAmount(minor) {
-  return (minor / 100).toFixed(2);
-}
-
 function formatDate(ts) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString();
@@ -37,29 +33,24 @@ export default function HistoryPage() {
             <thead>
               <tr>
                 <th>ID</th>
+                <th>Type</th>
                 <th>Status</th>
-                <th>Amount</th>
-                <th>Currency</th>
+                <th>Reference</th>
                 <th>Description</th>
                 <th>Created</th>
               </tr>
             </thead>
             <tbody>
-              {transactions.map((tx) => {
-                const amt = tx.amount ?? tx.total_amount ?? 0;
-                return (
-                  <tr key={tx.id}>
-                    <td className="text-muted">{String(tx.id).slice(0, 8)}…</td>
-                    <td>{tx.status}</td>
-                    <td className={amt >= 0 ? 'amount-positive' : 'amount-negative'}>
-                      {amt >= 0 ? '+' : ''}{formatAmount(amt)}
-                    </td>
-                    <td>{tx.currency}</td>
-                    <td className="text-muted">{tx.description ?? '—'}</td>
-                    <td className="text-muted">{formatDate(tx.created_at)}</td>
-                  </tr>
-                );
-              })}
+              {transactions.map((tx) => (
+                <tr key={tx.id}>
+                  <td className="text-muted">{String(tx.id).slice(0, 8)}…</td>
+                  <td>{tx.type}</td>
+                  <td>{tx.status}</td>
+                  <td className="text-muted">{tx.reference ?? '—'}</td>
+                  <td className="text-muted">{tx.description ?? '—'}</td>
+                  <td className="text-muted">{formatDate(tx.createdAt)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
