@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+
+    <!--
+        Exclude jOOQ generated sources — machine-generated, not under our control.
+        Covers both the root jooq package (DefaultCatalog, Public) and sub-packages
+        (tables, records, etc.).
+    -->
+    <Match>
+        <Package name="~com\.neobank\.\w+\.jooq"/>
+    </Match>
+    <Match>
+        <Package name="~com\.neobank\.\w+\.jooq\..+"/>
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP2 — "storing externally mutable object into field"
+        This is a false positive in Spring constructor injection: every injected
+        dependency (DSLContext, RedisTemplate, PasswordEncoder, etc.) is a Spring
+        singleton bean managed outside this class. Storing the reference is safe
+        and is the canonical DI pattern.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP — "returning internal mutable object"
+        Same rationale as above for Spring beans returned from accessor methods.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+
+    <!-- Exclude Spring Boot application entry points — false positives on main() exit codes -->
+    <Match>
+        <Bug pattern="DM_EXIT"/>
+    </Match>
+
+    <!-- Exclude test classes — SpotBugs flags test-only patterns (e.g. intentional null assignments) -->
+    <Match>
+        <Class name="~.*Test"/>
+    </Match>
+    <Match>
+        <Class name="~.*IntegrationTest"/>
+    </Match>
+
+</FindBugsFilter>
