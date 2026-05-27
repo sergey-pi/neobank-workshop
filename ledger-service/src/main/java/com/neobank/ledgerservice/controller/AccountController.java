@@ -1,13 +1,13 @@
 package com.neobank.ledgerservice.controller;
 
 import com.neobank.common.exception.ForbiddenException;
-import com.neobank.common.filter.RequestAttributes;
+import com.neobank.common.security.AuthenticatedPrincipal;
+import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.AccountResponse;
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
 import com.neobank.ledgerservice.jooq.tables.Accounts;
 import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.service.AccountService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.jooq.DSLContext;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/accounts")
@@ -33,17 +32,15 @@ public class AccountController {
 
     @PostMapping
     public AccountResponse createAccount(@Valid @RequestBody CreateAccountRequest request,
-                                         HttpServletRequest httpRequest) {
-        UUID tokenUserId = RequestAttributes.requireUserId(httpRequest);
-        if (!tokenUserId.equals(request.userId())) {
+                                         @AuthenticatedPrincipal JwtPrincipal principal) {
+        if (!principal.userId().equals(request.userId())) {
             throw new ForbiddenException("Cannot create accounts for other users");
         }
         return accountService.createAccount(request);
     }
 
     @GetMapping
-    public List<AccountResponse> getAccounts(HttpServletRequest request) {
-        UUID userId = RequestAttributes.requireUserId(request);
+    public List<AccountResponse> getAccounts(@AuthenticatedPrincipal JwtPrincipal principal) {
         return dsl.select(
                         Accounts.ACCOUNTS.ID,
                         Accounts.ACCOUNTS.USER_ID,
@@ -54,7 +51,7 @@ public class AccountController {
                         Balances.BALANCES.AVAILABLE_AMOUNT)
                 .from(Accounts.ACCOUNTS)
                 .leftJoin(Balances.BALANCES).on(Balances.BALANCES.ACCOUNT_ID.eq(Accounts.ACCOUNTS.ID))
-                .where(Accounts.ACCOUNTS.USER_ID.eq(userId))
+                .where(Accounts.ACCOUNTS.USER_ID.eq(principal.userId()))
                 .fetch(r -> new AccountResponse(
                         r.get(Accounts.ACCOUNTS.ID),
                         r.get(Accounts.ACCOUNTS.USER_ID),

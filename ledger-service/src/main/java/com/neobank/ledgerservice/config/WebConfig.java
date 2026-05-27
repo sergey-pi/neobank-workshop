@@ -1,12 +1,16 @@
 package com.neobank.ledgerservice.config;
 
 import com.neobank.common.filter.BearerTokenFilter;
+import com.neobank.common.security.JwtPrincipalArgumentResolver;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.List;
 
 /**
  * CORS configuration for ledger-service.
@@ -28,6 +32,11 @@ public class WebConfig implements WebMvcConfigurer {
         registration.addUrlPatterns("/api/*");
         registration.setOrder(1);
         return registration;
+    }
+
+    @Override
+    public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+        resolvers.add(new JwtPrincipalArgumentResolver());
     }
 
     @Override

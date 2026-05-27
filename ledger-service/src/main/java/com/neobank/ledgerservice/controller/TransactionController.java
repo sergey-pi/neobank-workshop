@@ -1,6 +1,7 @@
 package com.neobank.ledgerservice.controller;
 
-import com.neobank.common.filter.RequestAttributes;
+import com.neobank.common.security.AuthenticatedPrincipal;
+import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.PagedResponse;
 import com.neobank.ledgerservice.dto.TransactionResponse;
 import com.neobank.ledgerservice.dto.TransferRequest;
@@ -9,7 +10,6 @@ import com.neobank.ledgerservice.jooq.tables.Accounts;
 import com.neobank.ledgerservice.jooq.tables.Entries;
 import com.neobank.ledgerservice.jooq.tables.Transactions;
 import com.neobank.ledgerservice.service.LedgerService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -24,7 +24,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.UUID;
 
 @Validated
 @RestController
@@ -46,17 +45,15 @@ public class TransactionController {
     public TransferResponse transfer(
             @Valid @RequestBody TransferRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpServletRequest httpRequest) {
-        UUID tokenUserId = RequestAttributes.requireUserId(httpRequest);
-        return ledgerService.transfer(request, idempotencyKey, tokenUserId);
+            @AuthenticatedPrincipal JwtPrincipal principal) {
+        return ledgerService.transfer(request, idempotencyKey, principal.userId());
     }
 
     @GetMapping
     public PagedResponse<TransactionResponse> getTransactions(
-            HttpServletRequest httpRequest,
+            @AuthenticatedPrincipal JwtPrincipal principal,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) @Min(1) @Max(MAX_PAGE_SIZE) int size) {
-        UUID userId = RequestAttributes.requireUserId(httpRequest);
 
         Integer totalCount = dsl.selectCount()
                 .from(Transactions.TRANSACTIONS)
@@ -65,7 +62,7 @@ public class TransactionController {
                                 .from(Entries.ENTRIES)
                                 .join(Accounts.ACCOUNTS)
                                 .on(Accounts.ACCOUNTS.ID.eq(Entries.ENTRIES.ACCOUNT_ID))
-                                .where(Accounts.ACCOUNTS.USER_ID.eq(userId))))
+                                .where(Accounts.ACCOUNTS.USER_ID.eq(principal.userId()))))
                 .fetchOne(0, Integer.class);
         long total = totalCount != null ? totalCount.longValue() : 0L;
 
@@ -79,7 +76,7 @@ public class TransactionController {
                 .from(Transactions.TRANSACTIONS)
                 .join(Entries.ENTRIES).on(Entries.ENTRIES.TRANSACTION_ID.eq(Transactions.TRANSACTIONS.ID))
                 .join(Accounts.ACCOUNTS).on(Accounts.ACCOUNTS.ID.eq(Entries.ENTRIES.ACCOUNT_ID))
-                .where(Accounts.ACCOUNTS.USER_ID.eq(userId))
+                .where(Accounts.ACCOUNTS.USER_ID.eq(principal.userId()))
                 .orderBy(Transactions.TRANSACTIONS.CREATED_AT.desc())
                 .limit(size)
                 .offset((long) page * size)
