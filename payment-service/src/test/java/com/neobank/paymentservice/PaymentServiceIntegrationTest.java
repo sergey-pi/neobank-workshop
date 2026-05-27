@@ -3,6 +3,7 @@ package com.neobank.paymentservice;
 import com.neobank.paymentservice.dto.PaymentRequest;
 import com.neobank.paymentservice.jooq.tables.PaymentOutbox;
 import com.neobank.paymentservice.service.OutboxPoller;
+import com.neobank.common.security.JwtPrincipal;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class PaymentServiceIntegrationTest {
 
     private RequestPostProcessor authenticatedAs(UUID userId) {
         return request -> {
-            request.setAttribute("userId", userId);
+            request.setAttribute("principal", new JwtPrincipal(userId, "test@example.com"));
             return request;
         };
     }

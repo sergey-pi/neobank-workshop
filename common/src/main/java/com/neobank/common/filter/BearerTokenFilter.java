@@ -1,5 +1,6 @@
 package com.neobank.common.filter;
 
+import com.neobank.common.security.JwtPrincipal;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -15,7 +16,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 
 public final class BearerTokenFilter implements Filter {
 
@@ -61,8 +61,7 @@ public final class BearerTokenFilter implements Filter {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            httpRequest.setAttribute("userId", UUID.fromString(claims.getSubject()));
-            httpRequest.setAttribute("userEmail", claims.get("email", String.class));
+            httpRequest.setAttribute("principal", JwtPrincipal.fromClaims(claims));
             chain.doFilter(request, response);
         } catch (JwtException | IllegalArgumentException ex) {
             httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

@@ -4,6 +4,7 @@ import com.neobank.ledgerservice.dto.CreateAccountRequest;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.gateway.KycGateway;
 import com.neobank.ledgerservice.jooq.tables.Balances;
+import com.neobank.common.security.JwtPrincipal;
 import tools.jackson.databind.ObjectMapper;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class LedgerServiceIntegrationTest {
 
     private RequestPostProcessor authenticatedAs(UUID userId) {
         return request -> {
-            request.setAttribute("userId", userId);
+            request.setAttribute("principal", new JwtPrincipal(userId, "test@example.com"));
             return request;
         };
     }
