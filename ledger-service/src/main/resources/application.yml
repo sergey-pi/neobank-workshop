@@ -35,6 +35,26 @@ services:
     base-url: ${USER_SERVICE_URL:http://localhost:8081}
   internal-service-key: ${INTERNAL_SERVICE_KEY:}
 
+resilience4j:
+  circuitbreaker:
+    instances:
+      kycGateway:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+  bulkhead:
+    instances:
+      kycGateway:
+        max-concurrent-calls: 20
+        max-wait-duration: 100ms
+  timelimiter:
+    instances:
+      kycGateway:
+        timeout-duration: 3s
+
 security:
   limits:
     max-transfer-amount: ${MAX_TRANSFER_AMOUNT:1000000}
