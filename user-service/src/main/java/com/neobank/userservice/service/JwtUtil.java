@@ -19,14 +19,14 @@ import java.util.UUID;
 public final class JwtUtil {
 
     private final String secret;
-    private final long expirationHours;
+    private final long expirationMinutes;
     private SecretKey signingKey;
 
     public JwtUtil(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.expiration-hours}") long expirationHours) {
+            @Value("${jwt.expiration-minutes}") long expirationMinutes) {
         this.secret = secret;
-        this.expirationHours = expirationHours;
+        this.expirationMinutes = expirationMinutes;
     }
 
     @PostConstruct
@@ -36,9 +36,10 @@ public final class JwtUtil {
 
     public String generateToken(UUID userId, String email) {
         Instant issuedAt = Instant.now();
-        Instant expiresAt = issuedAt.plus(expirationHours, ChronoUnit.HOURS);
+        Instant expiresAt = issuedAt.plus(expirationMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(userId.toString())
                 .claim("email", email)
                 .issuedAt(Date.from(issuedAt))
@@ -56,6 +57,6 @@ public final class JwtUtil {
     }
 
     public long getExpirationSeconds() {
-        return expirationHours * 3600;
+        return expirationMinutes * 60;
     }
 }

@@ -1,10 +1,12 @@
 package com.neobank.ledgerservice.config;
 
 import com.neobank.common.filter.BearerTokenFilter;
+import com.neobank.common.security.TokenBlacklistChecker;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -22,8 +24,11 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Bean
     public FilterRegistrationBean<BearerTokenFilter> bearerTokenFilter(
-            @Value("${jwt.secret:}") String jwtSecret) {
-        BearerTokenFilter filter = new BearerTokenFilter(jwtSecret);
+            @Value("${jwt.secret:}") String jwtSecret,
+            StringRedisTemplate redisTemplate) {
+        TokenBlacklistChecker checker = jti -> Boolean.TRUE.equals(
+                redisTemplate.hasKey("jwt:blacklist:" + jti));
+        BearerTokenFilter filter = new BearerTokenFilter(jwtSecret, checker);
         FilterRegistrationBean<BearerTokenFilter> registration = new FilterRegistrationBean<>(filter);
         registration.addUrlPatterns("/api/*");
         registration.setOrder(1);
