@@ -85,11 +85,10 @@ public class KycGateway {
         }
     }
 
-    private void requireKycApprovedFallback(UUID userId, ForbiddenException ex) {
-        throw ex;
-    }
-
     private void requireKycApprovedFallback(UUID userId, Exception ex) {
+        if (ex instanceof ForbiddenException forbiddenException) {
+            throw forbiddenException;
+        }
         log.warn("KYC gateway circuit open for user {} — denying transfer: {}", userId, ex.getMessage());
         throw new ForbiddenException("KYC service unavailable — transfer denied");
     }
