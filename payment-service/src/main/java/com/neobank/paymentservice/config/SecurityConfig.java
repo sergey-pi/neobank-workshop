@@ -22,6 +22,10 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
+                // Safe: auth uses Authorization: Bearer header (not cookies), which browsers
+                // cannot set cross-origin — so there is nothing for CSRF to forge.
+                // When refresh token cookies are added (issue #94), SameSite=Strict +
+                // Path-scoped cookie provides equivalent protection without server-side state.
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
