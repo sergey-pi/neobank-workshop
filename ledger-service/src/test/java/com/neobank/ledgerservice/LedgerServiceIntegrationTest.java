@@ -1,5 +1,7 @@
 package com.neobank.ledgerservice;
 
+import com.neobank.common.security.JwtAuthentication;
+import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.gateway.KycGateway;
@@ -14,14 +16,18 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -46,8 +52,19 @@ class LedgerServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(springSecurity())
+                .build();
         doNothing().when(kycGateway).requireKycApproved(any());
+    }
+
+    private RequestPostProcessor authenticatedAs(UUID userId) {
+        return authentication(new JwtAuthentication(new JwtPrincipal(userId, "test@example.com")));
+    }
+
+    private UUID responseUuid(MvcResult result, String fieldName) throws Exception {
+        return UUID.fromString(
+                objectMapper.readTree(result.getResponse().getContentAsString()).get(fieldName).asText());
     }
 
     private UUID createAccount(UUID userId) throws Exception {
@@ -58,6 +75,7 @@ class LedgerServiceIntegrationTest {
         CreateAccountRequest request = new CreateAccountRequest(userId, currency, "Main Wallet", "LIABILITY");
 
         MvcResult result = mockMvc.perform(post("/api/v1/accounts")
+                        .with(authenticatedAs(userId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -65,8 +83,7 @@ class LedgerServiceIntegrationTest {
                 .andExpect(jsonPath("$.availableAmount").value(0))
                 .andReturn();
 
-        return UUID.fromString(
-                objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText());
+        return responseUuid(result, "id");
     }
 
     /**
@@ -86,14 +103,29 @@ class LedgerServiceIntegrationTest {
     }
 
     @Test
+    void createAccount_forDifferentUser_returnsForbidden() throws Exception {
+        UUID tokenUserId = UUID.randomUUID();
+        CreateAccountRequest request = new CreateAccountRequest(UUID.randomUUID(), "USD", "Main Wallet", "LIABILITY");
+
+        mockMvc.perform(post("/api/v1/accounts")
+                        .with(authenticatedAs(tokenUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void transfer_insufficientFunds_returnsError() throws Exception {
-        UUID senderAccount = createAccount(UUID.randomUUID());
+        UUID senderUserId = UUID.randomUUID();
+        UUID senderAccount = createAccount(senderUserId);
         UUID receiverAccount = createAccount(UUID.randomUUID());
 
         TransferRequest request = new TransferRequest(
                 senderAccount, receiverAccount, 1000L, "USD", "Test transfer");
 
         mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(senderUserId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -102,13 +134,15 @@ class LedgerServiceIntegrationTest {
 
     @Test
     void transfer_exceedsPerTransactionLimit_returns422() throws Exception {
-        UUID senderAccount = createAccount(UUID.randomUUID());
+        UUID senderUserId = UUID.randomUUID();
+        UUID senderAccount = createAccount(senderUserId);
         UUID receiverAccount = createAccount(UUID.randomUUID());
 
         TransferRequest request = new TransferRequest(
                 senderAccount, receiverAccount, 2_000_000L, "USD", "Oversized transfer");
 
         mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(senderUserId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnprocessableEntity())
@@ -117,7 +151,8 @@ class LedgerServiceIntegrationTest {
 
     @Test
     void transfer_kycNotApproved_returns403() throws Exception {
-        UUID senderAccount = createAccount(UUID.randomUUID());
+        UUID senderUserId = UUID.randomUUID();
+        UUID senderAccount = createAccount(senderUserId);
         UUID receiverAccount = createAccount(UUID.randomUUID());
 
         doThrow(new com.neobank.common.exception.ForbiddenException("KYC not approved"))
@@ -127,6 +162,26 @@ class LedgerServiceIntegrationTest {
                 senderAccount, receiverAccount, 100L, "USD", "KYC blocked transfer");
 
         mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(senderUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void transfer_fromOtherUsersAccount_returnsForbidden() throws Exception {
+        UUID ownerUserId = UUID.randomUUID();
+        UUID attackerUserId = UUID.randomUUID();
+        UUID senderAccount = createAccount(ownerUserId);
+        UUID receiverAccount = createAccount(UUID.randomUUID());
+        fundAccount(senderAccount, 1_000L);
+
+        TransferRequest request = new TransferRequest(
+                senderAccount, receiverAccount, 100L, "USD", "Forbidden transfer");
+
+        mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(attackerUserId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden())
@@ -135,24 +190,24 @@ class LedgerServiceIntegrationTest {
 
     @Test
     void transfer_exceedsDailySpendLimit_returns422() throws Exception {
-        UUID sender = createAccount(UUID.randomUUID());
+        UUID senderUserId = UUID.randomUUID();
+        UUID sender = createAccount(senderUserId);
         UUID receiver = createAccount(UUID.randomUUID());
-        // Fund enough for 6 transfers of 900_000 (5_400_000 total > 5_000_000 daily limit)
         fundAccount(sender, 6_000_000L);
 
         TransferRequest request = new TransferRequest(sender, receiver, 900_000L, "USD", "daily spend test");
         String body = objectMapper.writeValueAsString(request);
 
-        // 5 transfers of 900_000 = 4_500_000 — under the 5_000_000 daily limit
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(post("/api/v1/transactions/transfer")
+                            .with(authenticatedAs(senderUserId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isOk());
         }
 
-        // 6th transfer: 4_500_000 + 900_000 = 5_400_000 — exceeds daily limit
         mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(senderUserId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isUnprocessableEntity())
@@ -161,14 +216,60 @@ class LedgerServiceIntegrationTest {
     }
 
     @Test
-    void getAccounts_returnsOk() throws Exception {
-        mockMvc.perform(get("/api/v1/accounts"))
-                .andExpect(status().isOk());
+    void getAccounts_returnsOnlyAuthenticatedUsersAccounts() throws Exception {
+        UUID firstUserId = UUID.randomUUID();
+        UUID secondUserId = UUID.randomUUID();
+        UUID firstAccountId = createAccount(firstUserId);
+        UUID secondAccountId = createAccount(secondUserId);
+
+        MvcResult result = mockMvc.perform(get("/api/v1/accounts")
+                        .with(authenticatedAs(firstUserId)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        assertThat(responseBody).contains(firstAccountId.toString());
+        assertThat(responseBody).doesNotContain(secondAccountId.toString());
     }
 
     @Test
-    void getTransactions_returnsOk() throws Exception {
-        mockMvc.perform(get("/api/v1/transactions"))
-                .andExpect(status().isOk());
+    void getTransactions_returnsOnlyScopedTransactions() throws Exception {
+        UUID visibleUserId = UUID.randomUUID();
+        UUID visibleSender = createAccount(visibleUserId);
+        UUID visibleReceiver = createAccount(UUID.randomUUID());
+        fundAccount(visibleSender, 5_000L);
+
+        UUID hiddenUserId = UUID.randomUUID();
+        UUID hiddenSender = createAccount(hiddenUserId);
+        UUID hiddenReceiver = createAccount(UUID.randomUUID());
+        fundAccount(hiddenSender, 5_000L);
+
+        TransferRequest visibleRequest = new TransferRequest(
+                visibleSender, visibleReceiver, 1_000L, "USD", "Visible transfer");
+        TransferRequest hiddenRequest = new TransferRequest(
+                hiddenSender, hiddenReceiver, 1_000L, "USD", "Hidden transfer");
+
+        UUID visibleTransactionId = responseUuid(mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(visibleUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(visibleRequest)))
+                .andExpect(status().isOk())
+                .andReturn(), "transactionId");
+
+        UUID hiddenTransactionId = responseUuid(mockMvc.perform(post("/api/v1/transactions/transfer")
+                        .with(authenticatedAs(hiddenUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(hiddenRequest)))
+                .andExpect(status().isOk())
+                .andReturn(), "transactionId");
+
+        MvcResult result = mockMvc.perform(get("/api/v1/transactions")
+                        .with(authenticatedAs(visibleUserId)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        assertThat(responseBody).contains(visibleTransactionId.toString());
+        assertThat(responseBody).doesNotContain(hiddenTransactionId.toString());
     }
 }
