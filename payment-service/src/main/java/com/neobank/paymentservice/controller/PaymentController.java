@@ -1,7 +1,6 @@
 package com.neobank.paymentservice.controller;
 
 import com.neobank.common.exception.ForbiddenException;
-import com.neobank.common.security.AuthenticatedPrincipal;
 import com.neobank.common.security.JwtPrincipal;
 import com.neobank.paymentservice.dto.PaymentOrderResponse;
 import com.neobank.paymentservice.dto.PaymentRequest;
@@ -10,6 +9,7 @@ import com.neobank.paymentservice.jooq.tables.PaymentOrders;
 import com.neobank.paymentservice.service.PaymentService;
 import jakarta.validation.Valid;
 import org.jooq.DSLContext;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +32,7 @@ public class PaymentController {
 
     @PostMapping
     public PaymentResponse processPayment(@Valid @RequestBody PaymentRequest request,
-                                          @AuthenticatedPrincipal JwtPrincipal principal) {
+                                          @AuthenticationPrincipal JwtPrincipal principal) {
         if (!principal.userId().equals(request.senderId())) {
             throw new ForbiddenException("Cannot create payments on behalf of other users");
         }
@@ -40,7 +40,7 @@ public class PaymentController {
     }
 
     @GetMapping
-    public List<PaymentOrderResponse> getPayments(@AuthenticatedPrincipal JwtPrincipal principal) {
+    public List<PaymentOrderResponse> getPayments(@AuthenticationPrincipal JwtPrincipal principal) {
         return dsl.selectFrom(PaymentOrders.PAYMENT_ORDERS)
                 .where(PaymentOrders.PAYMENT_ORDERS.USER_ID.eq(principal.userId()))
                 .orderBy(PaymentOrders.PAYMENT_ORDERS.CREATED_AT.desc())

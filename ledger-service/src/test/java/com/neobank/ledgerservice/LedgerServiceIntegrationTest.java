@@ -1,10 +1,11 @@
 package com.neobank.ledgerservice;
 
+import com.neobank.common.security.JwtAuthentication;
+import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
 import com.neobank.ledgerservice.dto.TransferRequest;
 import com.neobank.ledgerservice.gateway.KycGateway;
 import com.neobank.ledgerservice.jooq.tables.Balances;
-import com.neobank.common.security.JwtPrincipal;
 import tools.jackson.databind.ObjectMapper;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -49,15 +52,14 @@ class LedgerServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(springSecurity())
+                .build();
         doNothing().when(kycGateway).requireKycApproved(any());
     }
 
     private RequestPostProcessor authenticatedAs(UUID userId) {
-        return request -> {
-            request.setAttribute("principal", new JwtPrincipal(userId, "test@example.com"));
-            return request;
-        };
+        return authentication(new JwtAuthentication(new JwtPrincipal(userId, "test@example.com")));
     }
 
     private UUID responseUuid(MvcResult result, String fieldName) throws Exception {

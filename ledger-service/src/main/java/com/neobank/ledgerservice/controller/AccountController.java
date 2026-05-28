@@ -1,7 +1,6 @@
 package com.neobank.ledgerservice.controller;
 
 import com.neobank.common.exception.ForbiddenException;
-import com.neobank.common.security.AuthenticatedPrincipal;
 import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.AccountResponse;
 import com.neobank.ledgerservice.dto.CreateAccountRequest;
@@ -10,6 +9,7 @@ import com.neobank.ledgerservice.jooq.tables.Balances;
 import com.neobank.ledgerservice.service.AccountService;
 import jakarta.validation.Valid;
 import org.jooq.DSLContext;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +32,7 @@ public class AccountController {
 
     @PostMapping
     public AccountResponse createAccount(@Valid @RequestBody CreateAccountRequest request,
-                                         @AuthenticatedPrincipal JwtPrincipal principal) {
+                                         @AuthenticationPrincipal JwtPrincipal principal) {
         if (!principal.userId().equals(request.userId())) {
             throw new ForbiddenException("Cannot create accounts for other users");
         }
@@ -40,7 +40,7 @@ public class AccountController {
     }
 
     @GetMapping
-    public List<AccountResponse> getAccounts(@AuthenticatedPrincipal JwtPrincipal principal) {
+    public List<AccountResponse> getAccounts(@AuthenticationPrincipal JwtPrincipal principal) {
         return dsl.select(
                         Accounts.ACCOUNTS.ID,
                         Accounts.ACCOUNTS.USER_ID,

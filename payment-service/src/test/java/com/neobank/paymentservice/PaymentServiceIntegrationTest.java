@@ -1,9 +1,10 @@
 package com.neobank.paymentservice;
 
+import com.neobank.common.security.JwtAuthentication;
+import com.neobank.common.security.JwtPrincipal;
 import com.neobank.paymentservice.dto.PaymentRequest;
 import com.neobank.paymentservice.jooq.tables.PaymentOutbox;
 import com.neobank.paymentservice.service.OutboxPoller;
-import com.neobank.common.security.JwtPrincipal;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -46,14 +49,13 @@ class PaymentServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(springSecurity())
+                .build();
     }
 
     private RequestPostProcessor authenticatedAs(UUID userId) {
-        return request -> {
-            request.setAttribute("principal", new JwtPrincipal(userId, "test@example.com"));
-            return request;
-        };
+        return authentication(new JwtAuthentication(new JwtPrincipal(userId, "test@example.com")));
     }
 
     private UUID responseUuid(MvcResult result, String fieldName) throws Exception {

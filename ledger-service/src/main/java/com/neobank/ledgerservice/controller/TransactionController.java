@@ -1,6 +1,5 @@
 package com.neobank.ledgerservice.controller;
 
-import com.neobank.common.security.AuthenticatedPrincipal;
 import com.neobank.common.security.JwtPrincipal;
 import com.neobank.ledgerservice.dto.PagedResponse;
 import com.neobank.ledgerservice.dto.TransactionResponse;
@@ -14,6 +13,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.jooq.DSLContext;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,13 +45,13 @@ public class TransactionController {
     public TransferResponse transfer(
             @Valid @RequestBody TransferRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @AuthenticatedPrincipal JwtPrincipal principal) {
+            @AuthenticationPrincipal JwtPrincipal principal) {
         return ledgerService.transfer(request, idempotencyKey, principal.userId());
     }
 
     @GetMapping
     public PagedResponse<TransactionResponse> getTransactions(
-            @AuthenticatedPrincipal JwtPrincipal principal,
+            @AuthenticationPrincipal JwtPrincipal principal,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) @Min(1) @Max(MAX_PAGE_SIZE) int size) {
 
