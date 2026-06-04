@@ -8,6 +8,15 @@ spring:
     username: ${DB_USER:neouser}
     password: ${DB_PASSWORD:neopassword}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+      idle-timeout: 600000
+      connection-timeout: 30000
+      max-lifetime: 1800000
+      keepalive-time: 60000
+      pool-name: ${spring.application.name:service}-pool
+      leak-detection-threshold: 60000
   flyway:
     enabled: true
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/neobank_payment_db
@@ -22,6 +31,22 @@ spring:
 server:
   port: 8083
   shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
 
 logging:
   config: classpath:logback-spring.xml
