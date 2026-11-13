@@ -6,11 +6,11 @@ Multi-module Maven project (Java 21, Spring Boot 4.0.6) consisting of three inde
 
 | Service | Port | Database | Responsibility |
 |---|---|---|---|
-| `user-service` | 8081 | `neobank_user_db` | Identity, registration, KYC |
-| `ledger-service` | 8082 | `neobank_ledger_db` | Double-entry accounting, balances |
+| `user-service` | 8081 | `neobank_user_db` | Identity, registration, login (JWT), KYC |
+| `ledger-service` | 8082 | `neobank_ledger_db` | Double-entry accounting, balances, transfer idempotency |
 | `payment-service` | 8083 | `neobank_payment_db` | Payment orders, Outbox pattern |
 
-Services reference each other only via `user_id` UUID — there are no cross-database foreign keys. The root `pom.xml` is the parent aggregator for these three modules. `core-engine/` is a separate standalone Spring Boot module (not part of the parent build).
+Services reference each other only via `user_id` UUID — there are no cross-database foreign keys. The root `pom.xml` is the parent aggregator for these three modules. `core-engine/` is a separate standalone Spring Boot module with its own `mvnw` (not part of the parent build — build it with `cd core-engine && ./mvnw verify`). `frontend/` is a React 18 + Vite client (plain JS/JSX) built with npm, outside Maven — see `.github/instructions/frontend.instructions.md`.
 
 ## Git Workflow
 
@@ -26,10 +26,10 @@ Services reference each other only via `user_id` UUID — there are no cross-dat
 ## Build & Run
 
 ```bash
-# PostgreSQL priority: use local Homebrew PostgreSQL first.
-# If not available, fall back to Docker:
-#   brew services start postgresql@18   ← preferred
-#   docker compose up -d                ← fallback
+# PostgreSQL 16 + Redis 7 (same versions as docker-compose.yml and CI).
+# Use local Homebrew services first; fall back to Docker:
+#   brew services start postgresql@16 && brew services start redis   ← preferred
+#   docker compose up -d                                              ← fallback
 
 # Build all modules
 ./mvnw clean install
@@ -73,11 +73,11 @@ All monetary values are stored as `BIGINT` in **minor units** (cents/pence). Nev
 ### DTOs
 All request/response DTOs are Java records (not classes). Place them in the `dto/` package of the relevant service.
 
-### Optimistic Locking
-`balances.version` in the ledger service is used for optimistic locking. Updates check `AVAILABLE_AMOUNT >= requested_amount` and increment `VERSION` atomically; a return of `0` updated rows means contention or insufficient funds.
+### Balance Locking
+Transfers lock the source `balances` row with `SELECT … FOR UPDATE` (pessimistic) before the sufficient-funds check; the debit/credit UPDATEs then increment `balances.version`. A credit UPDATE that touches `0` rows means the destination balance row is missing and the transaction rolls back.
 
 ### Outbox Pattern
-Payment service writes to `payment_outbox` in the same transaction as `payment_orders`. Events have a `status` of `PENDING` until processed. Use `idx_payment_outbox_status` index for polling queries.
+Payment service writes to `payment_outbox` in the same transaction as `payment_orders`. Events have a `status` of `PENDING` until processed. Use `idx_payment_outbox_status` index for polling queries. `OutboxPoller` runs every `outbox.poll.interval-ms` (default 5000, fixed delay), handles up to 10 events per run with one transaction per event and `SELECT … FOR UPDATE SKIP LOCKED`, backs off exponentially (`outbox.poll.retry-base-delay-seconds`, default 30 s) and marks events `FAILED` after `outbox.poll.max-retries` (default 3).
 
 ### Double-Entry Accounting
 In the ledger `entries` table: **negative** amounts = debit (outflow), **positive** amounts = credit (inflow). Every transfer creates exactly two `entries` rows within the same `transactions` record.
@@ -105,7 +105,7 @@ Every code change must include or update integration tests:
 Run `./mvnw test -pl <service>` locally before pushing.
 
 ### Document All Logic
-Public classes and non-trivial methods must have Javadoc explaining *why*, not just *what*. Multi-step logic (e.g. the 9-step transfer order) must have numbered inline comments. Never leave `// TODO` or vague placeholder comments in committed code.
+Public classes and non-trivial methods must have Javadoc explaining *why*, not just *what*. Multi-step logic (e.g. the 14-step transfer order in `LedgerService`) must have numbered inline comments. Never leave `// TODO` or vague placeholder comments in committed code.
 
 ## Database Credentials (local dev)
 
@@ -118,13 +118,28 @@ Databases: neobank_user_db | neobank_ledger_db | neobank_payment_db
 
 Credentials are configured in each service's `src/main/resources/application.yml` and mirrored in the Flyway/jOOQ Maven plugin configuration in `pom.xml`.
 
+### Transfer Idempotency
+`POST /api/v1/transactions/transfer` accepts an optional `Idempotency-Key` header. `LedgerService` checks Redis first (`TransferIdempotencyCache`, key `transfer-idem:{key}`, TTL 24 h); the authoritative guard is the `UNIQUE` constraint `uq_transactions_idempotency_key` on `transactions.idempotency_key` with `ON CONFLICT DO NOTHING`, which returns the existing transaction. The Redis key is written only after the DB commit.
+
+## JWT Authentication
+
+- **Login**: `POST /api/v1/users/login` (`LoginRequest {email, password}`) → `LoginResponse {accessToken, userId, email, expiresIn}`. Bad credentials → 401 (`UnauthorizedException`), suspended user → 403.
+- **Token issuing**: `JwtUtil` in `user-service` (`com.neobank.userservice.service.JwtUtil`) signs HS256 tokens: `sub` = userId, claim `email`, expiry `jwt.expiration-hours` (default 1). Secret: `jwt.secret` / env `JWT_SECRET` (≥ 256 bits, identical in all services).
+- **Dependency**: jjwt 0.13.x — `jjwt-api` (compile) plus `jjwt-impl` and `jjwt-jackson` (runtime) in `user-service` and `common`. Use the 0.12+ API (`Jwts.builder().subject(...)`, `Jwts.parser().verifyWith(key)`, `Jwts.SIG.HS256`).
+- **Authenticated requests**: clients send `Authorization: Bearer <accessToken>`. ledger-service and payment-service register `common`'s `BearerTokenFilter` on `/api/*` (`WebConfig`); it sets request attributes `userId` and `userEmail` on a valid token and returns 401 on an invalid/expired one. Requests without the header currently pass through.
+- **user-service `SecurityConfig`**: `permitAll` for `/health`, `/api/v1/users/register`, `/api/v1/users/login`, `/api/v1/users/*/kyc-status`, `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`; `anyRequest().authenticated()` otherwise. CSRF disabled; CORS from `cors.allowed-origins`. No bearer-token filter is wired into this chain yet.
+- **Internal calls**: `/kyc-status` is additionally guarded by `InternalServiceKeyFilter` (`X-Service-Key` header, `INTERNAL_SERVICE_KEY`) when the key is configured.
+
 ### Exception Handling
 A shared `GlobalExceptionHandler` in the `common` module is auto-configured into all services via Spring Boot autoconfiguration. It returns RFC 7807 `ProblemDetail` responses:
 - `ConflictException` → 409, `code=CONFLICT`
 - `NotFoundException` → 404, `code=NOT_FOUND`
 - `UnprocessableException` → 422, `code=UNPROCESSABLE`
-- `IllegalArgumentException` → 400
-- `RuntimeException` → 500
+- `ForbiddenException` → 403, `code=FORBIDDEN`
+- `UnauthorizedException` → 401, `code=UNAUTHORIZED`
+- `ServiceUnavailableException` → 503, `code=SERVICE_UNAVAILABLE`
+- `IllegalArgumentException` → 400, `code=BAD_REQUEST`
+- `RuntimeException` → 500, `code=INTERNAL_ERROR`
 
 ## Testing Conventions (Spring Boot 4)
 
