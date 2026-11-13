@@ -1,5 +1,7 @@
 package com.neobank.ledgerservice.service;
 
+import com.neobank.common.exception.ForbiddenException;
+import com.neobank.common.exception.NotFoundException;
 import com.neobank.common.exception.UnprocessableException;
 import com.neobank.ledgerservice.cache.SpendCounterCache;
 import com.neobank.ledgerservice.cache.TransferIdempotencyCache;
@@ -98,9 +100,10 @@ public class LedgerService {
      *
      * @param request        transfer parameters (amounts in minor units)
      * @param idempotencyKey optional client-supplied idempotency key (from {@code Idempotency-Key} header)
+     * @param tokenUserId    authenticated user id from the bearer token
      * @return completed transfer summary
      */
-    public TransferResponse transfer(TransferRequest request, String idempotencyKey) {
+    public TransferResponse transfer(TransferRequest request, String idempotencyKey, UUID tokenUserId) {
         // Redis fast-path: return cached result without any DB work.
         if (idempotencyKey != null) {
             Optional<String> cached = idempotencyCache.get(idempotencyKey);
@@ -124,8 +127,10 @@ public class LedgerService {
                 .fetchOne(Accounts.ACCOUNTS.USER_ID);
 
         if (fromUserId == null) {
-            throw new IllegalArgumentException(
-                    "From account not found or has no balance: " + request.fromAccountId());
+            throw new NotFoundException("From account not found");
+        }
+        if (!fromUserId.equals(tokenUserId)) {
+            throw new ForbiddenException("Cannot transfer from accounts you do not own");
         }
 
         // 3. KYC gate — HTTP call to user-service. Runs BEFORE the transaction

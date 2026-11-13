@@ -41,3 +41,6 @@ Implementation Plan-1
 # Log files
 logs/
 *.log
+
+# Local architecture docs — not committed
+docs/
