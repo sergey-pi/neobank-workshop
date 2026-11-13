@@ -9,5 +9,8 @@ public record TransactionResponse(
         String type,
         String status,
         String description,
-        OffsetDateTime createdAt) {
+        OffsetDateTime createdAt,
+        long amount,
+        String currency,
+        String direction) {
 }

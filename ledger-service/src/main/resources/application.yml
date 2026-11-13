@@ -8,6 +8,15 @@ spring:
     username: ${DB_USER:neouser}
     password: ${DB_PASSWORD:neopassword}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+      idle-timeout: 600000
+      connection-timeout: 30000
+      max-lifetime: 1800000
+      keepalive-time: 60000
+      pool-name: ${spring.application.name:service}-pool
+      leak-detection-threshold: 60000
   flyway:
     enabled: true
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/neobank_ledger_db
@@ -23,6 +32,22 @@ server:
   port: 8082
   shutdown: graceful
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+
 logging:
   config: classpath:logback-spring.xml
 
@@ -34,6 +59,26 @@ services:
   user-service:
     base-url: ${USER_SERVICE_URL:http://localhost:8081}
   internal-service-key: ${INTERNAL_SERVICE_KEY:}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      kycGateway:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+  bulkhead:
+    instances:
+      kycGateway:
+        max-concurrent-calls: 20
+        max-wait-duration: 100ms
+  timelimiter:
+    instances:
+      kycGateway:
+        timeout-duration: 3s
 
 security:
   limits:

@@ -6,6 +6,17 @@ function formatDate(ts) {
   return new Date(ts).toLocaleString();
 }
 
+function formatAmount(tx) {
+  if (tx?.amount == null) return '—';
+  const prefix = tx.direction === 'CREDIT' ? '+' : '-';
+  const currency = tx.currency ?? '';
+  return `${prefix}${(tx.amount / 100).toFixed(2)} ${currency}`.trim();
+}
+
+function amountColor(direction) {
+  return direction === 'CREDIT' ? 'green' : 'red';
+}
+
 export default function HistoryPage() {
   const [transactions, setTransactions] = useState([]);
   const [page, setPage] = useState(0);
@@ -51,6 +62,7 @@ export default function HistoryPage() {
                   <th>Status</th>
                   <th>Reference</th>
                   <th>Description</th>
+                  <th>Amount</th>
                   <th>Created</th>
                 </tr>
               </thead>
@@ -62,6 +74,7 @@ export default function HistoryPage() {
                     <td>{tx.status}</td>
                     <td className="text-muted">{tx.reference ?? '—'}</td>
                     <td className="text-muted">{tx.description ?? '—'}</td>
+                    <td style={{ color: amountColor(tx.direction), fontWeight: 600 }}>{formatAmount(tx)}</td>
                     <td className="text-muted">{formatDate(tx.createdAt)}</td>
                   </tr>
                 ))}
