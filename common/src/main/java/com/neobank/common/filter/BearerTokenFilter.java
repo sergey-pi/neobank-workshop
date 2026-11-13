@@ -1,5 +1,7 @@
 package com.neobank.common.filter;
 
+import com.neobank.common.security.JwtPrincipal;
+import com.neobank.common.security.TokenBlacklistChecker;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -15,7 +17,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 
 public final class BearerTokenFilter implements Filter {
 
@@ -25,11 +26,17 @@ public final class BearerTokenFilter implements Filter {
             "{\"status\":401,\"code\":\"UNAUTHORIZED\",\"detail\":\"Invalid or expired token\"}";
 
     private final SecretKey signingKey;
+    private final TokenBlacklistChecker blacklistChecker;
 
     public BearerTokenFilter(String jwtSecret) {
+        this(jwtSecret, null);
+    }
+
+    public BearerTokenFilter(String jwtSecret, TokenBlacklistChecker blacklistChecker) {
         this.signingKey = jwtSecret == null || jwtSecret.isBlank()
                 ? null
                 : Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+        this.blacklistChecker = blacklistChecker;
     }
 
     @Override
@@ -61,14 +68,21 @@ public final class BearerTokenFilter implements Filter {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            httpRequest.setAttribute("userId", UUID.fromString(claims.getSubject()));
-            httpRequest.setAttribute("userEmail", claims.get("email", String.class));
+            if (blacklistChecker != null && claims.getId() != null && blacklistChecker.isBlacklisted(claims.getId())) {
+                writeUnauthorized(httpResponse);
+                return;
+            }
+            httpRequest.setAttribute("principal", JwtPrincipal.fromClaims(claims));
             chain.doFilter(request, response);
         } catch (JwtException | IllegalArgumentException ex) {
-            httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            httpResponse.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            httpResponse.setContentType("application/json");
-            httpResponse.getWriter().write(UNAUTHORIZED_BODY);
+            writeUnauthorized(httpResponse);
         }
+    }
+
+    private void writeUnauthorized(HttpServletResponse httpResponse) throws IOException {
+        httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        httpResponse.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        httpResponse.setContentType("application/json");
+        httpResponse.getWriter().write(UNAUTHORIZED_BODY);
     }
 }

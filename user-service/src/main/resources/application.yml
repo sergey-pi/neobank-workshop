@@ -43,7 +43,7 @@ cors:
 
 jwt:
   secret: ${JWT_SECRET:dev-secret-change-in-production-min-256-bits}
-  expiration-hours: ${JWT_EXPIRATION_HOURS:1}
+  expiration-minutes: ${JWT_EXPIRATION_MINUTES:15}
 
 springdoc:
   api-docs:

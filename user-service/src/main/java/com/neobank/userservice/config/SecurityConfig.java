@@ -38,6 +38,7 @@ public class SecurityConfig {
                                 "/api/v1/users/register",
                                 "/api/v1/users/login",
                                 "/api/v1/users/*/kyc-status",
+                                "/api/v1/auth/logout",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"

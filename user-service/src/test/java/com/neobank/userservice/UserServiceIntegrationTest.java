@@ -2,20 +2,30 @@ package com.neobank.userservice;
 
 import com.neobank.userservice.dto.LoginRequest;
 import com.neobank.userservice.dto.UserRegistrationRequest;
+import com.neobank.userservice.service.JwtUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -30,10 +40,19 @@ class UserServiceIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    @MockitoBean
+    private StringRedisTemplate redisTemplate;
+
+    private ValueOperations<String, String> valueOperations;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        valueOperations = mock();
+        given(redisTemplate.opsForValue()).willReturn(valueOperations);
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
     }
 
@@ -105,7 +124,33 @@ class UserServiceIntegrationTest {
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.userId").value(userId))
                 .andExpect(jsonPath("$.email").value(email))
-                .andExpect(jsonPath("$.expiresIn").value(3600));
+                .andExpect(jsonPath("$.expiresIn").value(900));
+    }
+
+    @Test
+    void logout_success_blacklistsTokenJti() throws Exception {
+        String email = "logout+" + UUID.randomUUID() + "@example.com";
+
+        mockMvc.perform(post("/api/v1/users/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildRequest(email))))
+                .andExpect(status().isOk());
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(buildLoginRequest(email, "password123"))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String accessToken = objectMapper.readTree(loginResult.getResponse().getContentAsString())
+                .get("accessToken").asText();
+        String jti = jwtUtil.validateAndParse(accessToken).getId();
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+
+        verify(valueOperations).set(eq("jwt:blacklist:" + jti), eq("1"), any(Duration.class));
     }
 
     @Test
